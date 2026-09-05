@@ -80,14 +80,20 @@ def _select(key: torch.Tensor, N: int) -> torch.Tensor:
     among equal keys at the cut. ``torch.topk`` picks arbitrarily among ties and differently
     per device, which made the same logits encode to different ranks on cpu and mps
     (``settle_ties`` orders what was selected; it cannot repair what was selected)."""
+    # Memory: ``key`` is (K, slab) float32, a gigabyte on a whole-body part, and this runs
+    # on a 16 GB laptop's GPU beside the network - so no K-sized temporaries beyond two bool
+    # masks, and the selection is written back into ``key`` (the caller's throwaway copy).
     cut = torch.topk(-key, N, dim=0).values[N - 1:N].neg()     # the N-th smallest key
-    below = key < cut                                           # always in
+    chosen = key < cut                                          # always in
     at = key == cut                                             # the tie at the cut
-    room = N - below.sum(0, keepdim=True)                       # slots left for the tie
-    take = at & (at.to(torch.int32).cumsum(0) <= room)          # its lowest indices
-    chosen = below | take
-    keyed = torch.where(chosen, key, torch.full_like(key, float("inf")))
-    return torch.topk(-keyed, N, dim=0).indices                 # exactly the chosen N; any order
+    room = (N - chosen.sum(0, dtype=torch.int32)).to(torch.int16)
+    seen = torch.zeros_like(room)
+    for k in range(key.shape[0]):                               # walk the tie in class order
+        seen += at[k]
+        chosen[k] |= at[k] & (seen <= room)                     # its lowest indices
+    del at
+    key.masked_fill_(~chosen, float("inf"))
+    return torch.topk(-key, N, dim=0).indices                   # exactly the chosen N; any order
 
 
 def _ordered_sum(w: torch.Tensor) -> torch.Tensor:
@@ -146,7 +152,7 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             sh = None
             key = gaps
         idx = _select(key, N)                                     # the N smallest keys, by index on ties
-        ktop = torch.gather(key, 0, idx)
+        ktop = torch.gather(key, 0, idx)                          # (key's unchosen entries are now inf)
         settle_ties(ktop, idx, N)
         g_sel = torch.gather(gaps, 0, idx)                        # true gaps of the kept
         sh_sel = torch.gather(sh, 0, idx) if sh is not None else torch.zeros_like(g_sel, dtype=torch.bool)

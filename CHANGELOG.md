@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 - 2026-09-05
+
+- `_select` (0.1.1's deterministic depth cut) allocated several (K, slab) temporaries and put
+  a whole-body encode past a 16 GB laptop's GPU budget; it now works in place on the key
+  with two bool masks and a class-order walk, same result (`tests/test_review_fixes.py`).
+
 ## 0.1.1 - 2026-09-05
 
 Defects an adversarial review of 0.1.0 reproduced, all pinned by `tests/test_review_fixes.py`:
