@@ -106,6 +106,10 @@ def _curve(meta: dict) -> tuple[str, float, float]:
     origin = float(meta.get("gap_origin", GAP_ORIGIN))
     if curve not in ("uniform", "log"):
         raise ValueError(f"unknown gap_curve {curve!r}")
+    if not rng > 0 or (curve == "log" and not origin > 0):
+        # a table built from these would be zeros, negative or NaN - and every decoder
+        # would index it without a word (the JavaScript reader refuses the same values)
+        raise ValueError(f"gap_range {rng} / gap_origin {origin} do not describe a curve")
     return curve, rng, origin
 
 

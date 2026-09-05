@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-09-05
+
+- `levels()` refuses a non-positive `gap_range`, or `gap_origin` on the log curve, instead of
+  building a table of zeros or NaN - what the JavaScript reader already refused.
+
 ## 0.1.2 - 2026-09-05
 
 - `_select` (0.1.1's deterministic depth cut) allocated several (K, slab) temporaries and put

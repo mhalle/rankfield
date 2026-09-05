@@ -107,3 +107,15 @@ class TestRestoreRefuses:
         with pytest.raises(ValueError, match="placement"):
             rf.restore([framed(12, 1), framed(40, 2)], grid=2.0)
         rf.restore([framed(12, 1), framed(12, 2)], grid=2.0)         # the same frame: fine
+
+
+class TestLevelsRefuse:
+    @pytest.mark.parametrize("meta", [
+        {"clip": 8.0, "gap_curve": "sqrt"},
+        {"clip": 8.0, "gap_curve": "log", "gap_range": 0.0},
+        {"clip": 8.0, "gap_curve": "log", "gap_range": 64.0, "gap_origin": -1.0},
+        {"clip": 8.0, "gap_range": -8.0},
+    ])
+    def test_a_block_that_describes_no_curve_is_refused(self, meta):
+        with pytest.raises(ValueError):
+            rf.levels(meta)
