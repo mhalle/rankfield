@@ -133,6 +133,9 @@ Against the labels the pipeline wrote from its live logits, 0.3 differs at 0.003
 voxels, within the byte quantum of a tie; against a float64 reference restore of the
 stored field, at exact ties only. The truncation floor no longer decides a winner. What a
 finer quantum near zero would buy is below what the tests can measure.
+Reproduced through haversack's product path on 2026-09-05 (`haversack segment ... -o torso.duckn.zip`,
+then `haversack restore --spacing 1.5` against `haversack segment --spacing 1.5`): 0.0037 % of
+voxels, left 12th rib +0.40 %.
 
 ## Experiments
 
