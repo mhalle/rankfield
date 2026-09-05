@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rankfield"
+version = "0.1.0"
+description = "rankfield: a per-class field kept as ranks - the encoding, its decoders, and the restore"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+torch = ["torch>=2.7"]           # encode, decode_groups and the restore's blend run on torch
+cuda = ["triton>=3.0"]           # the CUDA restore kernel; enable_fp_fusion must exist as a launch option
+test = ["pytest>=8", "torch>=2.7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rankfield"]
+
+[tool.ruff]
+line-length = 110
