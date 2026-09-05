@@ -23,7 +23,7 @@ store) until it is locked down. numpy is required; torch for encode and the rest
 blend; triton (>= 3.0) for CUDA.
 
     uv pip install -e .            # from a checkout; or: pip install -e .
-    pip install "rankfield @ git+https://github.com/mhalle/rankfield.git@v0.1.0"
+    pip install "rankfield @ git+https://github.com/mhalle/rankfield.git@v0.1.1"
     pytest tests
 
 Apache-2.0.

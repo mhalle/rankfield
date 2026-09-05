@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.1 - 2026-09-05
+
+Defects an adversarial review of 0.1.0 reproduced, all pinned by `tests/test_review_fixes.py`:
+
+- `margin()` read a winner's sentinel byte (no stored runner-up) as level 0 - the curve's far
+  end, 64 logits under the log byte - instead of the clip, and did not floor a shell class at
+  `-clip`; 15 % of the voxels of a real field read 64 where the rendering field says 8. It now
+  floors as the spec says, and `deficit()` keeps the true level the restore reads. The test
+  that compared it with `decode_groups` used a field where neither path was reachable.
+- Encoding was not reproducible across devices: `topk` selects arbitrarily among equal keys at
+  the depth cut (`settle_ties` only orders what was selected), and the tail's mass summed in
+  the device's reduction order. `_select` takes the lowest class indices at the cut and the
+  tail sums in class order; cpu and mps now encode a tie-heavy field byte for byte.
+- The Metal and Triton kernels indexed the label table without a length check (Metal returned
+  garbage where the CPU raised); `restore` refuses a short or negative table up front.
+- `max_tail` said 0 when the tail was not written (it is now `None`); `probabilities()` divided
+  a missing `tail_max` by 255 instead of the uint16 quantum; two framed parts were assumed to
+  share a placement without comparing their frames.
+
 ## 0.1.0 - 2026-09-05
 
 Cut out of haversack's `ranked` module and its restore. Format 0.3: the shell keep rule and

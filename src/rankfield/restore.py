@@ -93,7 +93,11 @@ def _same_placement(a: Part, b: Part) -> bool:
     if bool(a.field.frame) != bool(b.field.frame):
         return False
     if a.field.frame:
-        return True                                     # both refer to the same source frame
+        # the same source frame: everything but the per-part model grid must agree
+        skip = ("model_shape", "model_spacing")
+        fa = {k: v for k, v in a.field.frame.items() if k not in skip}
+        fb = {k: v for k, v in b.field.frame.items() if k not in skip}
+        return fa == fb
     return (np.allclose(ga.origin_xyz, gb.origin_xyz) and np.allclose(ga.direction_xyz, gb.direction_xyz)
             and np.allclose(ga.spacing_zyx, gb.spacing_zyx)
             and tuple(a.field.ranks.shape[1:]) == tuple(b.field.ranks.shape[1:]))
@@ -219,6 +223,10 @@ def _restore_part(part: Part, grid_out: Grid, box, interp, out, *, paint, dev, s
     lut_np = np.asarray([int(v) for v in f.labels], dtype=np.int64)
     if lut_np.max() > (255 if (out.dtype == np.uint8 if isinstance(out, np.ndarray) else out.dtype == torch.uint8) else LABEL_MAX):
         raise ValueError(f"a label of {lut_np.max()} does not fit the output buffer")
+    if lut_np.min() < 0:
+        raise ValueError(f"a label of {lut_np.min()} is negative; labels are unsigned")
+    if len(lut_np) < f.classes:
+        raise ValueError(f"the label table has {len(lut_np)} entries for {f.classes} classes")
     clip = f.clip
     lut_levels = levels(f.meta)
     ranks_arr, sup_arr = f.ranks, f.support

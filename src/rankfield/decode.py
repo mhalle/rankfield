@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .code import SUPPORT_MAX, ZERO_LEVEL, RankField, levels
+from .code import SUPPORT_MAX, TAIL_MAX, ZERO_LEVEL, RankField, levels
 
 
 def _host(code: RankField, who: str) -> None:
@@ -24,27 +24,46 @@ def margin(code: RankField, channel: int) -> np.ndarray:
         out = (q - ZERO_LEVEL) / (SUPPORT_MAX - ZERO_LEVEL) * clip
         out[q == 0] = -clip
         return out
+    return _field(code, channel, floor=True)
+
+
+def _field(code: RankField, channel: int, *, floor: bool) -> np.ndarray:
+    """The channel's level at every voxel: the runner-up's gap where it wins, minus its own
+    gap where it trails, ``-clip`` where it is unnamed. ``floor`` clamps every stored level to
+    the clip as well - the rendering field, where the clip is the range of what is shown -
+    while the restore field keeps a shell class at its true gap (format.md, "The restore").
+    A winner whose runner-up is unnamed (support byte 0, the sentinel) leads by AT LEAST the
+    clip: that byte is not a level and must never be read as one - ``levels[0]`` is the
+    curve's far end, 64 logits under the default log byte, not 8."""
+    clip = code.clip
     lut = levels(code.meta)
     shape = tuple(code.meta["shape"])
     out = np.full(shape, -clip, np.float32)
     want = int(channel) + 1
     sel = code.ranks[0] == want
     if code.support.shape[0]:
-        out[sel] = lut[code.support[0][sel]]          # the winner's margin IS the runner-up's gap
+        s0 = code.support[0][sel]
+        lead = lut[s0]
+        if floor:
+            lead = np.minimum(lead, clip)
+        out[sel] = np.where(s0 == 0, np.float32(clip), lead)
     else:
         out[sel] = clip
     for j in range(1, code.ranks.shape[0]):
         sel = code.ranks[j] == want
-        out[sel] = -lut[code.support[j - 1][sel]]
+        level = -lut[code.support[j - 1][sel]]
+        out[sel] = np.maximum(level, -clip) if floor else level
     return out
 
 
 def deficit(code: RankField, channel: int) -> np.ndarray:
-    """``l_c - max_j l_j``: zero where c wins, negative behind. The logits up to a per-voxel
-    constant shared by every channel - the field a restore interpolates."""
-    out = margin(code, channel)
+    """``l_c - max_j l_j``: zero where c wins, negative behind (a shell class at its TRUE
+    gap, an unnamed one at ``-clip``). The logits up to a per-voxel constant shared by every
+    channel - the field a restore interpolates, bit for bit what ``restore`` reads."""
     if code.meta.get("mode") == "regions":
-        return out
+        return margin(code, channel)
+    _host(code, "deficit")
+    out = _field(code, channel, floor=False)
     out[code.ranks[0] == int(channel) + 1] = 0.0
     return out
 
@@ -180,9 +199,8 @@ def probabilities(code: RankField) -> tuple[np.ndarray, np.ndarray]:
     w[ids < 0] = 0.0
     z = w.sum(axis=0)
     if code.tail is not None:
-        tail_max = float(code.meta.get("tail_max") or 255)
+        tail_max = float(code.meta.get("tail_max") or TAIL_MAX)   # the uint16 quantum
         z = z / np.clip(1.0 - code.tail.astype(np.float32) / tail_max, 1e-6, None)
     p = w / z
     p[ids < 0] = 0.0
-    del clip
     return ids, p

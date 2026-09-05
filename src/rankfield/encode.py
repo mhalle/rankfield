@@ -43,9 +43,10 @@ def settle_ties(top: torch.Tensor, idx: torch.Tensor, N: int) -> None:
     is argmax's own convention, so ``ranks[0]`` remains exactly the argmax every labelmap was
     made with. Bubble, because a tie can run longer than a pair; ``N`` is small.
 
-    This orders what was selected; it cannot change WHICH was selected. A tie straddling the
-    depth boundary is still resolved by ``topk``, hence backend-dependent - measured at 16
-    voxels in 11.5 M on a real part, all on the least significant plane.
+    This orders what was selected; WHICH is selected is ``_select``'s, which takes the lowest
+    indices among equal keys at the depth cut - so a tie straddling the boundary is resolved
+    the same way on every device too (``topk`` alone left that to the backend: 216 of 693
+    voxels of a tie-heavy field differed between cpu and mps).
     """
     for _ in range(N - 1):
         for j in range(N - 1):
@@ -72,6 +73,30 @@ def _shell(win_ext: torch.Tensor, K: int, halo_lo: int, zs: int) -> torch.Tensor
                 w = zpad[z0 + dz:z0 + dz + zs, 1 + dy:1 + dy + Y, 1 + dx:1 + dx + X]
                 shell.scatter_(0, w[None], True)
     return shell
+
+
+def _select(key: torch.Tensor, N: int) -> torch.Tensor:
+    """Indices (N, ...) of the N smallest keys along dim 0, choosing the LOWEST class index
+    among equal keys at the cut. ``torch.topk`` picks arbitrarily among ties and differently
+    per device, which made the same logits encode to different ranks on cpu and mps
+    (``settle_ties`` orders what was selected; it cannot repair what was selected)."""
+    cut = torch.topk(-key, N, dim=0).values[N - 1:N].neg()     # the N-th smallest key
+    below = key < cut                                           # always in
+    at = key == cut                                             # the tie at the cut
+    room = N - below.sum(0, keepdim=True)                       # slots left for the tie
+    take = at & (at.to(torch.int32).cumsum(0) <= room)          # its lowest indices
+    chosen = below | take
+    keyed = torch.where(chosen, key, torch.full_like(key, float("inf")))
+    return torch.topk(-keyed, N, dim=0).indices                 # exactly the chosen N; any order
+
+
+def _ordered_sum(w: torch.Tensor) -> torch.Tensor:
+    """Sum over dim 0 in index order, one elementwise add per plane: the same IEEE operations
+    in the same order on every device."""
+    acc = w[0].clone()
+    for k in range(1, w.shape[0]):
+        acc = acc + w[k]
+    return acc
 
 
 def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CLIP,
@@ -120,8 +145,8 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
         else:
             sh = None
             key = gaps
-        ktop, idx = torch.topk(-key, N, dim=0)                    # the N smallest keys
-        ktop = -ktop
+        idx = _select(key, N)                                     # the N smallest keys, by index on ties
+        ktop = torch.gather(key, 0, idx)
         settle_ties(ktop, idx, N)
         g_sel = torch.gather(gaps, 0, idx)                        # true gaps of the kept
         sh_sel = torch.gather(sh, 0, idx) if sh is not None else torch.zeros_like(g_sel, dtype=torch.bool)
@@ -145,14 +170,19 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             support[:, z0:z1] = sup.to(torch.uint8).cpu().numpy()
         ranks[:, z0:z1] = r.cpu().numpy().astype(rdt, copy=False)
         if tail is not None:
-            z_full = torch.exp(-gaps).sum(0)
+            # summed in class order, one add at a time: a device's own reduction order would
+            # move the rounded byte by one between machines, and a store's bytes must not
+            # depend on where they were written
+            z_full = _ordered_sum(torch.exp(-gaps))
             kept_mass = torch.exp(-g_sel)
             kept_mass[~kept] = 0.0
-            t = ((z_full - kept_mass.sum(0)) / z_full).clamp(0, 1)
+            t = ((z_full - _ordered_sum(kept_mass)) / z_full).clamp(0, 1)
             max_tail = max(max_tail, float(t.max()))
             tail[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
         del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept
-    meta["max_tail"] = 0.0 if exhaustive else max_tail
+    # what was dropped: 0 when nothing could be, the measured maximum when the tail was
+    # written, and unknown - not zero - when it was not
+    meta["max_tail"] = 0.0 if exhaustive else (max_tail if tail is not None else None)
     meta["tail_max"] = None if tail is None else TAIL_MAX
     return RankField(ranks=ranks, support=support, tail=tail, meta=meta)
 
