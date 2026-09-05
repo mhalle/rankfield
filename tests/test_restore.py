@@ -2,7 +2,6 @@
 rules the reviews forced (paint on the decision, ties to the stored winner, far-edge grids)."""
 import numpy as np
 import pytest
-import torch
 
 import rankfield as rf
 from rankfield import reference_restore

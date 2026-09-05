@@ -71,7 +71,8 @@ def deficit(code: RankField, channel: int) -> np.ndarray:
 def to_device(code: RankField, device) -> RankField:
     """The planes on ``device`` once, so repeated decodes do not re-upload."""
     dev = torch.device(device)
-    mv = (lambda a: None if a is None else torch.from_numpy(np.ascontiguousarray(a)).to(dev))
+    def mv(a):
+        return None if a is None else torch.from_numpy(np.ascontiguousarray(a)).to(dev)
     return RankField(ranks=mv(code.ranks), support=mv(code.support), tail=mv(code.tail),
                      meta=dict(code.meta), labels=code.labels, geometry=code.geometry,
                      frame=code.frame)
@@ -186,7 +187,6 @@ def probabilities(code: RankField) -> tuple[np.ndarray, np.ndarray]:
     """``(class_ids, p)`` for the stored channels; absent classes get id -1 and p 0.
     Ranked: ``p_j = exp(-g_j) / Z`` with ``Z = Z_kept / (1 - tail)``; regions: sigmoids."""
     _host(code, "probabilities")
-    clip = code.clip
     if code.meta.get("mode") == "regions":
         m = np.stack([margin(code, c) for c in range(code.classes)])
         ids = np.broadcast_to(np.arange(code.classes, dtype=np.int64)[:, None, None, None], m.shape)
