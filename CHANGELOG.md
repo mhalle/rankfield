@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1 - 2026-09-07
+
+- `import rankfield` needed torch, which is the `torch` extra: `decode.py`, `encode.py` and
+  `restore.py` imported it at module scope and `__init__` imports all three, so a default
+  install (numpy only) raised `ModuleNotFoundError` and no numpy decoder was reachable.
+  Those modules bind a proxy now that imports torch on the first attribute read and names
+  the extra when there is nothing to import; annotations are postponed package-wide, so a
+  `torch.Tensor` in a signature never resolves it. `margin()`, `deficit()`,
+  `probabilities()`, `levels()` and the store reader run with no torch installed
+  (`tests/test_no_torch.py` decodes a field in a child interpreter with torch blocked).
+- The GPU backends resolved torch at import through `@torch.no_grad()`; `run_ranked` enters
+  the context when it runs instead, and `available()` answers False when torch cannot be
+  imported rather than raising.
+
 ## 0.2.0 - 2026-09-07
 
 Format 0.4, and the store readable without haversack.
