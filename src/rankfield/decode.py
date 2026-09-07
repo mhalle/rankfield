@@ -16,7 +16,11 @@ def _host(code: RankField, who: str) -> None:
 def margin(code: RankField, channel: int) -> np.ndarray:
     """``l_c - max_{j != c} l_j``: positive inside by the lead, zero on the boundary, negative
     outside, ``-clip`` where the channel is absent. The field to render and mesh; NOT the
-    field to restore from (see :func:`deficit`)."""
+    field to restore from (see :func:`deficit`).
+
+    The lead is measured against the nearest class the encoding KEPT, so it is an upper
+    bound on the true lead: where a closer competitor lost the depth cut to a shell class,
+    this reads high (docs/format.md, "What the keep rule does not promise")."""
     _host(code, "margin")
     clip = code.clip
     if code.meta.get("mode") == "regions":
@@ -28,8 +32,8 @@ def margin(code: RankField, channel: int) -> np.ndarray:
 
 
 def _field(code: RankField, channel: int, *, floor: bool) -> np.ndarray:
-    """The channel's level at every voxel: the runner-up's gap where it wins, minus its own
-    gap where it trails, ``-clip`` where it is unnamed. ``floor`` clamps every stored level to
+    """The channel's level at every voxel: the nearest kept competitor's gap where it wins,
+    minus its own gap where it trails, ``-clip`` where it is unnamed. ``floor`` clamps every stored level to
     the clip as well - the rendering field, where the clip is the range of what is shown -
     while the restore field keeps a shell class at its true gap (format.md, "The restore").
     A winner whose runner-up is unnamed (support byte 0, the sentinel) leads by AT LEAST the

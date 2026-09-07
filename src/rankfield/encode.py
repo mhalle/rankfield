@@ -1,16 +1,28 @@
 """The encoder: logits -> :class:`RankField`, in slabs on the logits' own device.
 
 What is kept per voxel (format 0.3, the ``shell`` rule): every class that wins at the
-voxel or at any of its 26 neighbours, with its true gap - so any class that wins at one
-corner of an interpolation stencil is present, with its gap, at every other corner, and a
-restore never scores it at the floor. Then the closest non-winners within ``clip``. Kept
-entries are ordered by gap, so ``ranks[1]`` is the true runner-up, and dropped entries are
-the sentinel and come last (a reader may stop at the first one).
+voxel or at any of its 26 neighbours, with its true gap; then the closest non-winners
+within ``clip``; until the planes are full. Kept entries are ordered by gap, and dropped
+entries are the sentinel and come last (a reader may stop at the first one).
 
-Why: a class dropped by the clip used to be floored at ``-clip`` by the restore, an
-UPPER bound on its deficit, which over-credited it exactly where it mattered - thin
-structures grew (a 12th rib by 19 %). Keeping the shell removes that bias at the cost of
-6 % more bytes on a whole-body case; measured in the format document.
+Why: a class dropped by the clip is floored at ``-clip`` by the restore, an UPPER bound on
+its deficit, which over-credits it exactly where it matters - thin structures grew (a 12th
+rib by 19 %). Carrying the neighbours' winners narrows that, because a class that wins at
+one corner of an interpolation stencil is then present, with its gap, at every corner the
+depth has room for.
+
+Narrows, not removes. Three things the rule above does not promise, each pinned by a test
+in ``tests/test_review_fixes.py`` and measured in the format document under "What the keep
+rule does not promise":
+
+* ``ranks[1]`` is the nearest KEPT class, not always the true runner-up: shell classes take
+  the planes first, so a closer non-winner can be evicted by one that wins at a neighbour.
+* A 27-voxel neighbourhood can hold more winners than ``depth`` planes. The class dropped
+  then is the farthest shell class - never the winner, which the depth cut keeps.
+* A class kept at one corner and dropped at another still reads at the floor there, so it
+  can still win an interpolation it should lose.
+
+Depth is the knob that closes all three, and the format document carries the curve.
 
 The gap byte follows the meta's curve (``log`` over ``gap_range``): a shell class can be
 30 logits behind at the far corner and still be recorded, while the quantum near zero,
