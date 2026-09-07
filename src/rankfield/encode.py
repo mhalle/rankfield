@@ -152,7 +152,13 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
              {t: np.empty((Z, Y, X), np.uint16) for t in temps if t != 1.0})
     max_tail = 0.0
     max_tails = {t: 0.0 for t in tails}
-    big = 1e6
+    # An offset that puts every shell class under every other class, and nothing more. It has
+    # to exceed the largest gap that can arise, so the logits' own range serves; 1e6 did not,
+    # because float32 steps by 0.0625 there and collapsed gaps a thousandth of a logit apart
+    # into a tie with the winner, which the depth cut then broke by class index - dropping the
+    # winner itself at a junction of more shell classes than the depth holds. Taken over the
+    # whole volume, not the slab, so `slab` still cannot move a byte.
+    big = float(lg_all.max().float() - lg_all.min().float()) + 1.0
     for z0 in range(0, Z, slab):
         z1 = min(z0 + slab, Z)
         lg = lg_all[:, z0:z1].float()
@@ -166,12 +172,22 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
         else:
             sh = None
             key = gaps
+        # Before the cut: _select fills the unchosen with inf IN PLACE, and with keep="clip"
+        # the key is `gaps` itself (the shell branch copies it, that branch has nothing to
+        # copy), so a partition function read afterwards would score every dropped class as
+        # zero mass and report a tail of nothing.
+        z_full = _ordered_sum(torch.exp(-gaps)) if tail is not None else None
+        z_temps = {t: _ordered_sum(torch.exp(-gaps / t)) for t in tails}
         idx = _select(key, N)                                     # the N smallest keys, by index on ties
         ktop = torch.gather(key, 0, idx)                          # (key's unchosen entries are now inf)
         settle_ties(ktop, idx, N)
         g_sel = torch.gather(gaps, 0, idx)                        # true gaps of the kept
         sh_sel = torch.gather(sh, 0, idx) if sh is not None else torch.zeros_like(g_sel, dtype=torch.bool)
-        kept = sh_sel | (g_sel < clip)
+        # With a plane per class there is nothing to gain by dropping one: the clip would
+        # leave a class the field has room for at the -clip floor and cost a tail to
+        # describe. `exhaustive` says nothing was dropped, so nothing is.
+        kept = (torch.ones_like(g_sel, dtype=torch.bool) if exhaustive
+                else sh_sel | (g_sel < clip))
         kept[0] = True                                            # the winner, always
         # order the kept by true gap so ranks[1] is the runner-up; the dropped go last
         order_key = torch.where(kept, g_sel, torch.full_like(g_sel, big))
@@ -194,20 +210,19 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             # summed in class order, one add at a time: a device's own reduction order would
             # move the rounded byte by one between machines, and a store's bytes must not
             # depend on where they were written
-            z_full = _ordered_sum(torch.exp(-gaps))
             kept_mass = torch.exp(-g_sel)
             kept_mass[~kept] = 0.0
             t = ((z_full - _ordered_sum(kept_mass)) / z_full).clamp(0, 1)
             max_tail = max(max_tail, float(t.max()))
             tail[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
         for temp, arr in tails.items():
-            z_t = _ordered_sum(torch.exp(-gaps / temp))
+            z_t = z_temps[temp]
             kept_t = torch.exp(-g_sel / temp)
             kept_t[~kept] = 0.0
             t = ((z_t - _ordered_sum(kept_t)) / z_t).clamp(0, 1)
             max_tails[temp] = max(max_tails[temp], float(t.max()))
             arr[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
-        del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept
+        del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept, z_full, z_temps
     # what was dropped: 0 when nothing could be, the measured maximum when the tail was
     # written, and unknown - not zero - when it was not
     meta["max_tail"] = 0.0 if exhaustive else (max_tail if tail is not None else None)

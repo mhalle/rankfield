@@ -75,7 +75,11 @@ def to_device(code: RankField, device) -> RankField:
         return None if a is None else torch.from_numpy(np.ascontiguousarray(a)).to(dev)
     return RankField(ranks=mv(code.ranks), support=mv(code.support), tail=mv(code.tail),
                      meta=dict(code.meta), labels=code.labels, geometry=code.geometry,
-                     frame=code.frame)
+                     frame=code.frame,
+                     # the extra-temperature planes travel too: the meta names them, and a
+                     # field whose meta promises a temperature it no longer carries makes
+                     # tail_at() raise on a field it was just handed
+                     tails=None if code.tails is None else {t: mv(a) for t, a in code.tails.items()})
 
 
 def decode_groups(code: RankField, groups, *, device=None, quantize: bool = False) -> torch.Tensor:

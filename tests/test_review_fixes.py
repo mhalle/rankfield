@@ -12,13 +12,18 @@ from conftest import devices, logits
 
 def _lone_and_shell():
     """A field with lone winners (nothing else within the clip, no shell member) and shell
-    classes far behind: a 1-D ramp between two classes, a third class nowhere near."""
+    classes far behind: a 1-D ramp between two classes, two more nowhere near.
+
+    Four classes against a depth of three on purpose. A field with a plane per class keeps
+    every class (`exhaustive`), so it has no sentinel to read and no lone winner to find.
+    """
     n = 40
     x = torch.arange(n, dtype=torch.float32)
     la = 12.0 * (20.5 - x)                             # steep, no tie: the neighbor's gap is past the clip
     lb = -la
     lc = torch.full((n,), -200.0)
-    return torch.stack([la, lb, lc]).reshape(3, 1, 1, n)
+    ld = torch.full((n,), -300.0)
+    return torch.stack([la, lb, lc, ld]).reshape(4, 1, 1, n)
 
 
 class TestMarginFloors:
@@ -32,7 +37,7 @@ class TestMarginFloors:
 
     def test_margin_and_decode_groups_agree_where_they_once_could_not(self):
         code = rf.encode(_lone_and_shell(), depth=3)
-        for c in range(3):
+        for c in range(4):
             np.testing.assert_allclose(rf.decode_groups(code, [[c]])[0].numpy(), rf.margin(code, c), atol=1e-6)
 
     def test_deficit_keeps_a_shell_class_at_its_true_gap(self):
@@ -119,3 +124,86 @@ class TestLevelsRefuse:
     def test_a_block_that_describes_no_curve_is_refused(self, meta):
         with pytest.raises(ValueError):
             rf.levels(meta)
+
+
+class TestSecondReview:
+    """Defects a second adversarial review reproduced (2026-09-07), pinned.
+
+    Its two remaining findings are not here: a dropped non-winner still reads at the
+    ``-clip`` floor and can win an interpolation, and a shell class still outranks a closer
+    true runner-up. Both are keep-rule decisions, not defects with a local fix.
+    """
+
+    def _junction(self, step, K=7):
+        """K winners meeting at one voxel: the centre's own, and one per neighbour. The
+        centre's trailing classes sit ``step`` logits apart, so the depth cut has to tell
+        gaps of that size apart to keep the winner."""
+        lg = np.full((K, 3, 3, 3), -5.0)
+        for c in range(K):
+            lg[c][1, 1, 1] = 0.0 if c == K - 1 else -step * (c + 1)
+        for c, v in enumerate([(0, 1, 1), (2, 1, 1), (1, 0, 1), (1, 2, 1), (1, 1, 0), (1, 1, 2)]):
+            lg[c][v] = 0.0
+        return torch.tensor(lg, dtype=torch.float32)
+
+    @pytest.mark.parametrize("step", [1.0, 0.1, 0.01, 0.001, 1e-4])
+    def test_the_depth_cut_keeps_the_winner_however_close_the_shell_crowds_it(self, step):
+        """A 1e6 offset put the keys where float32 steps by 0.0625, tying the winner with
+        classes a thousandth behind it; the cut then broke the tie by class index and
+        dropped the winner."""
+        lg = self._junction(step)
+        code = rf.encode(lg, depth=6)
+        stored = code.ranks[:, 1, 1, 1].astype(np.int64) - 1
+        assert int(stored[0]) == int(lg[:, 1, 1, 1].argmax()), "ranks[0] is not the argmax"
+        assert int(lg[:, 1, 1, 1].argmax()) in stored
+
+    def test_the_shell_class_the_depth_cannot_hold_is_the_farthest_one(self):
+        lg = self._junction(0.001)
+        code = rf.encode(lg, depth=6)
+        stored = set((code.ranks[:, 1, 1, 1].astype(np.int64) - 1).tolist())
+        gaps = (lg[:, 1, 1, 1].max() - lg[:, 1, 1, 1]).numpy()
+        dropped = set(range(7)) - stored
+        assert len(dropped) == 1
+        assert gaps[dropped.pop()] == gaps.max()
+
+    def test_the_clip_rule_measures_the_mass_it_dropped(self):
+        """``keep="clip"`` passed `gaps` itself as the selection key, and the cut fills the
+        unchosen with inf in place - so the tail was taken over the kept classes alone and
+        came out zero."""
+        lg = torch.tensor([[0.0], [-1.0], [-2.0]], dtype=torch.float32)[:, None, None, :]
+        code = rf.encode(lg, depth=1, keep="clip", curve="uniform", gap_range=8.0)
+        truth = 1.0 - float(torch.softmax(lg[:, 0, 0, 0].double(), 0)[0])
+        assert code.tail is not None
+        np.testing.assert_allclose(code.tail.ravel()[0] / 65535.0, truth, atol=2.0 / 65535)
+
+    def test_the_clip_and_shell_rules_agree_on_the_mass_they_dropped(self):
+        lg = logits(K=10, shape=(4, 6, 8))
+        a = rf.encode(lg, depth=4, keep="clip", curve="uniform", gap_range=8.0)
+        b = rf.encode(lg, depth=4, keep="shell")
+        assert float(a.tail.mean()) > 0.0
+        assert abs(float(a.tail.mean()) - float(b.tail.mean())) / 65535.0 < 0.05
+
+    def test_an_exhaustive_field_really_did_keep_every_class(self):
+        """`exhaustive` was `N >= K` - capacity, not retention. The clip still dropped
+        classes, and an exhaustive field writes no tail to describe them with."""
+        lg = torch.tensor([[0.0, 0.0], [-9.0, -9.0]], dtype=torch.float32)[:, None, None, :]
+        code = rf.encode(lg, depth=2)
+        assert code.meta["exhaustive"] and code.tail is None
+        assert (code.ranks != 0).all(), "an exhaustive field has no sentinel"
+        for T in (1.0, 4.0):
+            _, p = rf.probabilities(code, T)
+            truth = torch.softmax(lg[:, 0, 0, 0].double() / T, 0).numpy()
+            np.testing.assert_allclose(p[:, 0, 0, 0], truth, atol=0.01)
+
+    def test_an_exhaustive_field_sums_to_one_without_a_tail(self):
+        code = rf.encode(logits(K=5, shape=(4, 6, 8)), depth=5)
+        assert code.meta["exhaustive"] and code.meta["max_tail"] == 0.0
+        _, p = rf.probabilities(code)
+        np.testing.assert_allclose(p.sum(0), 1.0, atol=1e-5)
+
+    def test_to_device_carries_the_extra_temperature_tails(self):
+        code = rf.encode(logits(K=8, shape=(3, 5, 6)), depth=4, tail_temperatures=(1.0, 4.0))
+        moved = rf.to_device(code, "cpu")
+        assert sorted(moved.tails) == sorted(code.tails) == [4.0]
+        for T in moved.meta["tail_temperatures"]:
+            assert rf.tail_at(moved, T) is not None
+        np.testing.assert_array_equal(np.asarray(moved.tails[4.0]), code.tails[4.0])
