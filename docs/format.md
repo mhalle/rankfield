@@ -139,7 +139,10 @@ Labels differing from the interpolated original logits:
 | 30 | 1.5 | 5.234 % | 1.796 % | 0.595 % | 0.285 % | 0.253 % |
 
 The plateau is byte quantization, not the keep rule; depth cannot reach it. On smooth logits
-(no noise, 12 classes) depth 6 already differs at 0.049 %.
+(no noise, 12 classes) depth 6 already differs at 0.045 %.
+
+`tests/test_against_logits.py` is this comparison, and its `label_error` helper reproduces
+every figure in the table above from `conftest.logits(K, shape=(10, 14, 16), noise=1.5)`.
 
 `ranks[1]` disagrees with the true runner-up at depth 6 nowhere on smooth logits, at 1.5 % of
 voxels at 12 classes with noise and 9.3 % at 30. Where it disagrees the reported margin is off
@@ -149,13 +152,17 @@ the disagreement is 0.04 %.
 
 ### Two remedies, measured and rejected
 
-*Lower the floor* so a dropped class cannot win: **worse**, 2.5 % and 15.0 % on the two rows
+*Lower the floor* so a dropped class cannot win: **worse**, by 2.7x and 2.9x on the two rows
 above. The floor is load-bearing. A class dropped at every corner can legitimately win between
 them, and `-clip` is what lets it.
 
 *Keep every class the neighbours kept*, not just their winners: reaches 0.159 % and 0.297 %,
 but needs 9.1 and 11.9 planes per voxel. Plain depth reaches the same error with the same or
 fewer planes - 7.9 and 11.8. The rule change buys nothing that depth does not buy more cheaply.
+
+Both remedies were measured on the dense decoded field rather than through `restore()`, which
+is why they are quoted as ratios and plane counts; the table above, which `restore()` produces,
+is the one to trust for absolutes.
 
 So depth is the knob, and these are synthetic fields chosen to stress the rule rather than
 anatomy. The torso figures earlier in this document are what the rule does on one real case.

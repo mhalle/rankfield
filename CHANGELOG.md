@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.2 - 2026-09-07
+
+Four defects a second adversarial review reproduced, and the documentation the review said
+was writing cheques the code could not cash.
+
+- The depth cut offset shell classes by `1e6`, where float32 steps by 0.0625. Gaps a
+  thousandth of a logit apart collapsed into a tie with the winner, broken by class index -
+  so at a junction of more shell winners than the depth holds, the winner itself could be
+  dropped and a trailing class stored as `ranks[0]`, which breaks the identity restore. The
+  offset is the logits' own range now, taken over the whole volume so `slab` still cannot
+  move a byte. What the depth cannot hold is the farthest shell class.
+- `keep="clip"` passed `gaps` itself as the selection key and the cut fills the unchosen
+  with infinity in place, so the tail was measured over the kept classes alone and came out
+  zero. The partition functions are taken before the cut.
+- `exhaustive` was `depth >= classes`: capacity, not retention. The clip still dropped
+  classes and an exhaustive field writes no tail to describe them, so probabilities read 1
+  and 0 where the truth at T=4 was 0.905 and 0.095. A field with a plane per class now keeps
+  every class; there is no byte to save by dropping one. This changes the bytes of an
+  exhaustive field that had a class past the clip.
+- `to_device()` left the extra-temperature tails behind while copying the meta that names
+  them, so `tail_at()` raised on a field it had just been handed.
+
+The review's other two findings are keep-rule decisions, not local defects, and stand:
+`ranks[1]` is the nearest kept class rather than always the true runner-up, and a class kept
+at one corner and dropped at the next still reads at the `-clip` floor and can win an
+interpolation it should lose. Both are now documented, measured and pinned rather than
+denied. `docs/format.md` gains "What the keep rule does not promise" with the label error by
+depth, the runner-up disagreement rate, and two remedies measured and rejected - lowering the
+floor is nearly 3x worse, and keeping the neighbours' kept set costs more planes than the
+depth that matches it.
+
+- `tests/test_against_logits.py` compares a restore against the ORIGINAL logits. Every other
+  restore test compares it with a float64 reference restore of the same stored field, which
+  shares the representation with what it checks and cannot see any of this.
+- The specification was still titled 0.3; it describes 0.4's per-temperature tails and the
+  new meta keys now, and says `exhaustive` means nothing was dropped.
+- README: the store is no longer "in-memory only", numpy alone runs the decoders, and the
+  restore is introduced as an approximation with a number attached.
+
 ## 0.2.1 - 2026-09-07
 
 - `import rankfield` needed torch, which is the `torch` extra: `decode.py`, `encode.py` and
