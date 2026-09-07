@@ -164,26 +164,34 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
              {t: np.empty((Z, Y, X), np.uint16) for t in temps if t != 1.0})
     max_tail = 0.0
     max_tails = {t: 0.0 for t in tails}
-    # An offset that puts every shell class under every other class, and nothing more. It has
-    # to exceed the largest gap that can arise, so the logits' own range serves; 1e6 did not,
-    # because float32 steps by 0.0625 there and collapsed gaps a thousandth of a logit apart
-    # into a tie with the winner, which the depth cut then broke by class index - dropping the
-    # winner itself at a junction of more shell classes than the depth holds. Taken over the
-    # whole volume, not the slab, so `slab` still cannot move a byte.
-    big = float(lg_all.max().float() - lg_all.min().float()) + 1.0
+    # The offset that puts every shell class under every other class. A CONSTANT of the
+    # format, not a property of the data: the key's gaps are clamped at the range first, so
+    # nothing beyond it can inflate the offset. Two earlier offsets could not do this. 1e6
+    # sits where float32 steps by 0.0625, and the logits' own range let one outlying voxel
+    # push the offset back up there - either way gaps under the step collapsed into a tie
+    # that the depth cut broke by class index, and the winner itself could be the entry it
+    # dropped. Here the step is ~8e-6 logits whatever the data, and the winner is pinned
+    # below every key by -inf, so no step can reach it.
+    big = float(gap_range) + 1.0
     for z0 in range(0, Z, slab):
         z1 = min(z0 + slab, Z)
         lg = lg_all[:, z0:z1].float()
-        top0 = lg.max(0, keepdim=True).values
+        top0, win = lg.max(0, keepdim=True)     # the winner's index comes free with its value
         gaps = top0 - lg                                        # (K, zs, Y, X) >= 0
         if keep == "shell":
             lo, hi = max(0, z0 - 1), min(Z, z1 + 1)
             win_ext = lg_all[:, lo:hi].float().argmax(0)
             sh = _shell(win_ext, K, z0 - lo, z1 - z0)
-            key = torch.where(sh, gaps - big, gaps)
+            # Two (K, slab) planes live at the peak, which is what `torch.where(sh, gaps -
+            # big, gaps)` cost before. `key[sh] -= big` would read better and cost far more:
+            # a boolean mask materializes int64 indices, three bytes of temporary per byte
+            # of key.
+            key = gaps.clamp(max=float(gap_range))
+            key.add_(sh * -big)                             # shell first, by clamped gap
+            key.scatter_(0, win, float("-inf"))             # the winner, exactly, at any scale
         else:
             sh = None
-            key = gaps
+            key = gaps          # no offset, so the winner's gap of 0 is always among the N
         # Before the cut: _select fills the unchosen with inf IN PLACE, and with keep="clip"
         # the key is `gaps` itself (the shell branch copies it, that branch has nothing to
         # copy), so a partition function read afterwards would score every dropped class as
@@ -202,7 +210,9 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
                 else sh_sel | (g_sel < clip))
         kept[0] = True                                            # the winner, always
         # order the kept by true gap so ranks[1] is the runner-up; the dropped go last
-        order_key = torch.where(kept, g_sel, torch.full_like(g_sel, big))
+        # inf, not the offset: a KEPT shell class can trail by more than the range, and a
+        # dropped entry has to sort behind it for the sentinels to stay a suffix
+        order_key = torch.where(kept, g_sel, torch.full_like(g_sel, float("inf")))
         order_key, perm = torch.sort(order_key, dim=0, stable=True)
         idx = torch.gather(idx, 0, perm)
         g_sel = torch.gather(g_sel, 0, perm)
@@ -234,7 +244,7 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             t = ((z_t - _ordered_sum(kept_t)) / z_t).clamp(0, 1)
             max_tails[temp] = max(max_tails[temp], float(t.max()))
             arr[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
-        del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept, z_full, z_temps
+        del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept, z_full, z_temps, win
     # what was dropped: 0 when nothing could be, the measured maximum when the tail was
     # written, and unknown - not zero - when it was not
     meta["max_tail"] = 0.0 if exhaustive else (max_tail if tail is not None else None)

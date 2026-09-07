@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.3 - 2026-09-07
+
+- The depth cut could still drop the winner. 0.2.2 replaced the `1e6` shell offset with the
+  logits' own range, which narrowed the failure without removing its cause: a large float32
+  offset merges gaps that differ by less than its step, and the tie is broken by class index.
+  One outlying voxel anywhere in the volume pushed the offset back to where the step is
+  0.0625 - at junctions whose own class competition that voxel does not touch - and gaps
+  under the step collapsed there regardless. The offset is a constant of the format now,
+  `gap_range + 1`, with the key's gaps clamped at the range so no magnitude in the data can
+  inflate it, and the winner is pinned below every key at `-inf`, which no step can reach.
+  `ranks[0]` is the argmax unconditionally. Dropped entries now sort behind `inf` rather than
+  behind the offset, which a kept shell class can exceed.
+
+  Stored bytes are unchanged on shell, noisy, clip-rule and exhaustive fields. Encode
+  allocates the same 3330.7 MB on the 60-class benchmark it did before, to the megabyte, and
+  runs within noise of 0.2.2: the winner's index comes back from the `max` the encoder
+  already takes, and the offset is applied in place over the one temporary the key was
+  always going to need.
+
+The review's second finding of this round - that the rejected-remedy experiments were run on
+the dense decoded field, where a class stored at no corner can win, rather than through the
+candidate restore, where it cannot - is NOT addressed here. Re-measured through `restore()`
+the rejection stands (lowering the floor is ~3x worse on both fields), but the reason given
+in `docs/format.md` is wrong, and the union remedy's plane counts are understated because
+they were measured over a 6-neighbourhood where the rule says 26.
+
 ## 0.2.2 - 2026-09-07
 
 Four defects a second adversarial review reproduced, and the documentation the review said

@@ -113,8 +113,13 @@ closer non-winner can be evicted by a class that wins at a neighbour and trails 
 `margin()` then reports the lead over the nearest kept class, an upper bound on the true lead.
 
 **The shell can overflow.** When more classes win in the neighbourhood than the depth holds,
-one is dropped. It is the farthest shell class, never the winner: the depth cut orders shell
-classes by true gap, and the winner's gap is zero.
+one is dropped. It is the farthest shell class, never the winner. The cut ranks shell classes
+under everything else by subtracting a constant of the format - `gap_range + 1`, with the
+key's gaps clamped at the range first, so no logit magnitude in the data can inflate it - and
+pins the winner below every key at `-inf`. Both matter: an offset large enough to be coarse in
+float32 merges gaps that differ by less than its step, and a tie there is broken by class
+index, which cost the winner its place when the offset was `1e6`, and again when it was the
+logits' own range and one outlying voxel raised it.
 
 **A dropped class still reads at the floor.** A class kept at one corner with its true gap and
 dropped at the next reads `-clip` there, so the interpolation sees it far above the truth and

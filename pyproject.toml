@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rankfield"
-version = "0.2.2"
+version = "0.2.3"
 description = "rankfield: a per-class field kept as ranks - the encoding, its decoders, and the restore"
 license = "Apache-2.0"
 requires-python = ">=3.12"

@@ -145,16 +145,39 @@ class TestSecondReview:
             lg[c][v] = 0.0
         return torch.tensor(lg, dtype=torch.float32)
 
-    @pytest.mark.parametrize("step", [1.0, 0.1, 0.01, 0.001, 1e-4])
+    @pytest.mark.parametrize("step", [1.0, 0.1, 0.01, 0.001, 1e-4, 1e-8, 0.0])
     def test_the_depth_cut_keeps_the_winner_however_close_the_shell_crowds_it(self, step):
-        """A 1e6 offset put the keys where float32 steps by 0.0625, tying the winner with
-        classes a thousandth behind it; the cut then broke the tie by class index and
-        dropped the winner."""
+        """Offsetting the shell by a large float32 merged distinct gaps into a tie with the
+        winner, which the cut then broke by class index - dropping the winner. 1e6 sits where
+        float32 steps by 0.0625; the logits' own range only moved the step. The winner is
+        pinned by -inf now, so no step can reach it."""
         lg = self._junction(step)
         code = rf.encode(lg, depth=6)
         stored = code.ranks[:, 1, 1, 1].astype(np.int64) - 1
         assert int(stored[0]) == int(lg[:, 1, 1, 1].argmax()), "ranks[0] is not the argmax"
         assert int(lg[:, 1, 1, 1].argmax()) in stored
+
+    @pytest.mark.parametrize("step", [1e-4, 1e-8])
+    @pytest.mark.parametrize("outlier", [1e6, -1e9])
+    def test_one_outlying_voxel_does_not_cost_a_winner_anywhere_else(self, step, outlier):
+        """The offset was the logits' own range for one release, which a single extreme voxel
+        pushed back up to where float32 cannot separate the keys - at a voxel whose own class
+        competition it does not touch. The offset is a constant of the format now."""
+        lg = self._junction(step)
+        lg[:, 0, 0, 0] += outlier
+        code = rf.encode(lg, depth=6)
+        assert int(code.ranks[0, 1, 1, 1]) - 1 == int(lg[:, 1, 1, 1].argmax())
+
+    def test_a_kept_shell_class_past_the_range_still_outranks_a_sentinel(self):
+        """The dropped entries were ordered behind the kept with the shell offset, which is
+        smaller than a gap can be; they sort behind inf now, so sentinels stay a suffix."""
+        n = 30
+        x = torch.arange(n, dtype=torch.float32)
+        far = torch.stack([100.0 * (15.5 - x), -100.0 * (15.5 - x)] +
+                          [torch.full((n,), -v) for v in (9.0, 40.0, 300.0)])
+        code = rf.encode(far.reshape(5, 1, 1, n), depth=3)
+        for j in range(1, code.depth):
+            assert not ((code.ranks[j - 1] == 0) & (code.ranks[j] != 0)).any()
 
     def test_the_shell_class_the_depth_cannot_hold_is_the_farthest_one(self):
         lg = self._junction(0.001)
