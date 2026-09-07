@@ -1,6 +1,12 @@
-"""Float64 reference restore - tiny shapes only. What the candidate restore must compute:
-the K-channel deficit field interpolated with float64 weights, then argmax (lowest index
-on a tie). Returns ``(labels, winner margin)`` so a test can tell a tie from a defect."""
+"""Float64 reference restore - tiny shapes only: the K-channel deficit field interpolated
+with float64 weights, then argmax (lowest index on a tie). Returns ``(labels, winner
+margin)`` so a test can tell a tie from a defect.
+
+NOT the definition of :func:`~rankfield.restore`. This builds the whole dense field, so a
+class stored at no corner of the stencil still reads ``-clip`` here and can win; the restore
+considers only the classes stored at the eight corners. The two disagree exactly there
+(docs/format.md, "The restore"). On real fields that difference does not arise, which is
+what makes this a useful check on the kernels - it is a check, not a specification."""
 from __future__ import annotations
 
 import numpy as np

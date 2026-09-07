@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.4 - 2026-09-07
+
+Documentation and tests; no encoder or decoder change, and no bytes move.
+
+- The rejected-remedy experiments in `docs/format.md` ran on the dense decoded field, where a
+  class stored at no corner still reads `-clip` and can win. The restore never considers such
+  a class, so those numbers described a different algorithm. Re-run through `restore()`: the
+  rejection stands, but the reason given was wrong. The floor is load-bearing for CANDIDATES -
+  a class stored at some corners of the stencil and absent at others - not for classes dropped
+  everywhere, which cannot be the answer at all. The union remedy's cost was also understated,
+  at 9.1 and 11.9 planes per voxel measured over a 6-neighbourhood where the rule says 26; it
+  is 10.5 and 15.6.
+- `reference_restore` is not candidate-restricted and is not the definition of `restore`. It
+  interpolates the whole K-channel dense field, so a class stored nowhere can win it. The two
+  disagree exactly there, which `tests/test_against_logits.py` now pins with the case that
+  shows it. On real fields they agree at 0.0000 % of voxels, so the reference remains a check
+  on the kernels - the test that compares them says so now, rather than implying it defines
+  what the restore computes.
+
 ## 0.2.3 - 2026-09-07
 
 - The depth cut could still drop the winner. 0.2.2 replaced the `1e6` shell offset with the

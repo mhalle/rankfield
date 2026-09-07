@@ -101,6 +101,19 @@ class TestTheDocumentedLimits:
         live = stored_second >= 0
         assert (stored_second[live] != true_second[live]).mean() > 0.01
 
+    def test_the_float64_reference_is_not_candidate_restricted(self):
+        """format.md, "The float64 reference is not candidate-restricted". reference.py lets a
+        class stored at no corner win from the -clip floor; restore() never considers it, so
+        the two answer differently and only one of them can be called the restore."""
+        cols = np.array([[0.0, -40.0], [-40.0, 0.0], [-9.0, -9.0]]).T     # (voxel, class)
+        lg = torch.tensor(cols.T, dtype=torch.float32)[:, None, None, :]
+        part = _part(rf.encode(lg, depth=2), spacing=(1.0, 1.0, 1.0))
+        assert not (part.field.ranks == 3).any(), "C must be stored at neither voxel"
+        grid = rf.Grid(shape=(1, 1, 1), spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.4))
+        assert int((0.6 * cols[0] + 0.4 * cols[1]).argmax()) == 2         # the logits say C
+        assert int(rf.restore([part], grid=grid).labels.ravel()[0]) == 0
+        assert int(rf.reference_restore(part, grid)[0].ravel()[0]) == 2
+
     def test_depth_closes_the_runner_up_gap(self):
         lg = logits(K=30, noise=1.5)
 

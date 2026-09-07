@@ -157,17 +157,29 @@ the disagreement is 0.04 %.
 
 ### Two remedies, measured and rejected
 
-*Lower the floor* so a dropped class cannot win: **worse**, by 2.7x and 2.9x on the two rows
-above. The floor is load-bearing. A class dropped at every corner can legitimately win between
-them, and `-clip` is what lets it.
+All of these run through `restore()`, on the two fields above.
 
-*Keep every class the neighbours kept*, not just their winners: reaches 0.159 % and 0.297 %,
-but needs 9.1 and 11.9 planes per voxel. Plain depth reaches the same error with the same or
-fewer planes - 7.9 and 11.8. The rule change buys nothing that depth does not buy more cheaply.
+| rule | 12 classes | 30 classes |
+|---|---|---|
+| current, depth 6 | 0.937 % at 5.7 planes | 5.234 % at 6.0 planes |
+| lower the floor to -1000 | 2.546 % at 5.7 | 15.017 % at 6.0 |
+| keep every class the neighbours kept | 0.155 % at 10.5 | 0.248 % at 15.6 |
+| plain depth 10 | 0.159 % at 7.9 | 0.595 % at 9.9 |
+| plain depth 12 | 0.151 % at 12.0 | 0.285 % at 11.8 |
+| plain depth 16 | 0.151 % at 12.0 | 0.253 % at 15.1 |
 
-Both remedies were measured on the dense decoded field rather than through `restore()`, which
-is why they are quoted as ratios and plane counts; the table above, which `restore()` produces,
-is the one to trust for absolutes.
+*Lower the floor* so an absent class cannot win: **worse**, by 2.7x and 2.9x. The floor is
+load-bearing - but not because a class dropped everywhere can win. Such a class is stored at
+no corner, so the restore never considers it and it cannot be the answer at all. The floor
+works for CANDIDATES: a class stored at some corners of the stencil and absent at others reads
+`-clip` at the absent ones, and that upper bound is what lets a genuinely close class win
+where it should. The same floor that hands a far class a win it should not have is what
+carries these, which is why the bias cannot simply be lowered away.
+
+*Keep every class the neighbours kept*, not just their winners: reaches 0.155 % and 0.248 %,
+but needs 10.5 and 15.6 planes per voxel over the 26-neighbourhood the rule specifies. Plain
+depth reaches the same error for the same or fewer planes - depth 10 and depth 16 in the
+table. The rule change buys nothing that depth does not buy more cheaply.
 
 So depth is the knob, and these are synthetic fields chosen to stress the rule rather than
 anatomy. The torso figures earlier in this document are what the rule does on one real case.
@@ -212,6 +224,16 @@ grid: source grid, crop, model shape, resample convention) and restores onto gri
 source space exactly as the pipeline composed the mapping; or only its array geometry, and
 restores onto grids in its own array frame (voxel 0 at 0 mm, true spacing). All parts of a
 multi-part restore share one placement.
+
+*The float64 reference is not candidate-restricted.* `reference.py` builds the whole
+K-channel dense field, in which a class stored at NO corner still reads `-clip` and can win the
+argmax. `restore()` considers only the classes stored at the eight corners. The two implement
+different rules and disagree exactly where a class absent from the entire stencil would have
+won: with `A = [0, -40]`, `B = [-40, 0]`, `C = [-9, -9]` on two adjacent voxels at depth 2, the
+true interpolated argmax 40 % along is C, the reference returns C, and the restore returns A.
+On the fields behind the table above the two disagree at 0.0000 % of voxels, so the reference
+is still a good check on the kernels - but it is not the definition of what the restore
+computes, and a test that compares the two cannot tell the rules apart.
 
 *Bit-exactness.* The torch path, the Metal kernel and the Triton kernel make the same
 decisions bit for bit: the same corner order, the same weight products, fused multiply-add

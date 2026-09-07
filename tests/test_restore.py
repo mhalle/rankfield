@@ -19,7 +19,12 @@ def part(code, labels=None, spacing=(2.0, 2.0, 2.0), name="p"):
 def test_the_argmax_of_the_interpolated_deficit_matches_the_float64_reference():
     """On the store's own decoded field, the candidate restore equals reference.py's
     K-channel interpolation + argmax everywhere but at exact ties (which go to the stored
-    winner here, argmax's lowest index there)."""
+    winner here, argmax's lowest index there).
+
+    This checks the kernels, not the encoding: both sides read the same stored bytes, so
+    neither can see what the keep rule discarded (tests/test_against_logits.py does that),
+    and the reference is not candidate-restricted, so it can differ by rule as well as by
+    tie - constructed in test_against_logits.py, absent on fields like this one."""
     lg = logits(K=10, shape=(9, 11, 13), noise=0.2)
     code = rf.encode(lg, depth=6)
     p = part(code)
