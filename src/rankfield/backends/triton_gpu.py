@@ -9,7 +9,8 @@ the decisions match the torch and Metal paths bit for bit.
 from __future__ import annotations
 
 import numpy as np
-import torch
+
+from .._torch import have_torch, no_grad, torch
 
 try:
     import triton
@@ -32,7 +33,7 @@ def _has_fp_fusion_option() -> bool:
 
 
 def available() -> bool:
-    return triton is not None and torch.cuda.is_available() and _has_fp_fusion_option()
+    return triton is not None and have_torch() and torch.cuda.is_available() and _has_fp_fusion_option()
 
 
 def why_unavailable() -> str:
@@ -203,7 +204,7 @@ if triton is not None:
             tl.store(out_ptr + offs, label.to(out_dtype), mask=mask)
 
 
-@torch.no_grad()
+@no_grad
 def run_ranked(ranks: torch.Tensor, support: torch.Tensor, out: torch.Tensor, tables, lut, *,
                levels, clip: float, paint: bool, background: int = 0, block: int = 256) -> None:
     if not available():

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import numpy as np
-import torch
 
+from ._torch import torch
 from .code import SUPPORT_MAX, TAIL_MAX, ZERO_LEVEL, RankField, levels
 
 

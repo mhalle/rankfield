@@ -21,8 +21,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
-import torch
 
+from ._torch import torch
 from .code import (CLIP, DEFAULT_DEPTH, FORMAT_VERSION, GAP_ORIGIN, GAP_RANGE, GAP_UNIT,
                    SUPPORT_MAX, TAIL_MAX, ZERO_LEVEL, RankField, byte_of_gap, rank_dtype)
 

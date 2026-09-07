@@ -31,8 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import torch
 
+from ._torch import torch
 from .code import Part, levels
 from .frame import Frame
 from .geometry import Geometry

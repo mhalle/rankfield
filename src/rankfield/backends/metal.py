@@ -9,7 +9,8 @@ off, so the two agree bit for bit. Levels come from a 256-entry table, never a f
 from __future__ import annotations
 
 import numpy as np
-import torch
+
+from .._torch import have_torch, no_grad, torch
 
 RANKED_NMAX = 8             # rank planes the candidate list is sized for (8 corners x N)
 _VARIANTS = [("uchar", "uchar"), ("uchar", "ushort"), ("ushort", "uchar"), ("ushort", "ushort")]
@@ -128,7 +129,7 @@ _FP_CONTRACT: str | None = None
 
 
 def available() -> bool:
-    return bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+    return bool(have_torch() and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
                 and hasattr(torch.mps, "compile_shader"))
 
 
@@ -162,7 +163,7 @@ def fp_contract() -> str | None:
     return _FP_CONTRACT
 
 
-@torch.no_grad()
+@no_grad
 def run_ranked(ranks: torch.Tensor, support: torch.Tensor, out: torch.Tensor, tables, lut, *,
                levels, clip: float, paint: bool, background: int = 0, slab_voxels: int = 1 << 26,
                group_size: int = 256) -> None:
