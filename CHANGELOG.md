@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 - 2026-09-07
+
+Format 0.4, and the store readable without haversack.
+
+- `encode()` takes `tail_temperatures`. The default `(1.0,)` writes format 0.3's single tail
+  plane and the same bytes as before; any other temperature is measured over the same slabs
+  and kept in `RankField.tails`. A distillation at T needs the mass the encoding dropped at
+  T, which the T=1 tail does not give it - at T=4 a torso store drops 3.4 % of the mass on
+  average, a third of its voxels over 1 %.
+- `tail_at()` serves a stored plane and refuses a temperature that was never written, rather
+  than renormalizing with the wrong tail and misstating every probability; `probabilities()`
+  takes the temperature to decode at.
+- `rankfield.store` reads and writes the bare zarr v3 store - parts in paint order, geometry
+  from duckn's own models on write, per-temperature tails beside the T=1 plane. Reading needs
+  the `store` extra; writing also needs duckn, which is not on PyPI.
+- `requires-python` is now `>=3.12`: the zarr floor the store reads against needs it, and the
+  3.11 split had no solution.
+
+The prerelease of this work read `tail_temperatures` in `encode()` without taking it as an
+argument, so every call raised `NameError`. It is a parameter now, and `tests/test_encode.py`
+covers both the default and a second temperature.
+
 ## 0.1.3 - 2026-09-05
 
 - `levels()` refuses a non-positive `gap_range`, or `gap_origin` on the log curve, instead of

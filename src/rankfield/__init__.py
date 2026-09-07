@@ -24,4 +24,4 @@ __all__ = ["CLIP", "DEFAULT_DEPTH", "FORMAT_VERSION", "GAP_UNIT", "SUPPORT_MAX",
            "array_grid", "byte_of_gap", "decode_groups", "deficit", "encode", "encode_regions", "levels",
            "mapping_of", "margin", "probabilities", "reference_restore", "resolve_grid", "restore", "roi_of",
            "settle_ties", "tail_at", "to_device"]
-__version__ = "0.1.3"
+__version__ = "0.2.0"
