@@ -18,6 +18,8 @@ where a boundary is decided, stays at a few thousandths of a logit.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
@@ -108,13 +110,17 @@ def _ordered_sum(w: torch.Tensor) -> torch.Tensor:
 def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CLIP,
            keep: str = "shell", curve: str = "log", gap_range: float = GAP_RANGE,
            gap_origin: float = GAP_ORIGIN, slab: int | None = None,
-           with_tail: bool = True) -> RankField:
+           with_tail: bool = True,
+           tail_temperatures: Sequence[float] = (1.0,)) -> RankField:
     """``(K, Z, Y, X)`` logits -> :class:`RankField`.
 
     ``keep`` is ``"shell"`` (format 0.3) or ``"clip"`` (0.2's rule: within the clip only);
     ``curve`` ``"log"`` or ``"uniform"``; with ``keep="clip"``, ``curve="uniform"`` and
     ``gap_range=clip`` the bytes are format 0.2's. ``slab`` bounds peak memory (planes of
     the slab are promoted to fp32, and the shell mask is K bytes per voxel of the slab).
+    ``tail_temperatures`` are the softmax temperatures the dropped mass is measured at, each
+    positive; the default ``(1.0,)`` writes the single ``tail`` plane of format 0.3, and any
+    other temperature is written to ``tails`` beside it.
     """
     lg_all = _check(logits)
     K = int(lg_all.shape[0])
@@ -135,8 +141,17 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
         slab = max(1, min(Z, (1 << 28) // max(1, K * Y * X)))
     ranks = np.empty((N, Z, Y, X), rdt)
     support = np.empty((N - 1, Z, Y, X), np.uint8) if N > 1 else np.empty((0, Z, Y, X), np.uint8)
-    tail = None if (exhaustive or not with_tail) else np.empty((Z, Y, X), np.uint16)
+    temps = [float(t) for t in tail_temperatures]
+    if any(not t > 0 for t in temps):
+        raise ValueError(f"tail_temperatures must be positive, got {temps}")
+    tail = None if (exhaustive or not with_tail or 1.0 not in temps) else np.empty((Z, Y, X), np.uint16)
+    # format 0.4: the dropped mass at OTHER temperatures too - what a distillation at T
+    # needs and cannot recover from the kept classes (at T=4 a torso store drops 3.4 % of
+    # the mass on average, a third of its voxels over 1 %)
+    tails = ({} if (exhaustive or not with_tail) else
+             {t: np.empty((Z, Y, X), np.uint16) for t in temps if t != 1.0})
     max_tail = 0.0
+    max_tails = {t: 0.0 for t in tails}
     big = 1e6
     for z0 in range(0, Z, slab):
         z1 = min(z0 + slab, Z)
@@ -185,12 +200,23 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             t = ((z_full - _ordered_sum(kept_mass)) / z_full).clamp(0, 1)
             max_tail = max(max_tail, float(t.max()))
             tail[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
+        for temp, arr in tails.items():
+            z_t = _ordered_sum(torch.exp(-gaps / temp))
+            kept_t = torch.exp(-g_sel / temp)
+            kept_t[~kept] = 0.0
+            t = ((z_t - _ordered_sum(kept_t)) / z_t).clamp(0, 1)
+            max_tails[temp] = max(max_tails[temp], float(t.max()))
+            arr[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
         del lg, gaps, key, ktop, idx, g_sel, sh, sh_sel, kept
     # what was dropped: 0 when nothing could be, the measured maximum when the tail was
     # written, and unknown - not zero - when it was not
     meta["max_tail"] = 0.0 if exhaustive else (max_tail if tail is not None else None)
-    meta["tail_max"] = None if tail is None else TAIL_MAX
-    return RankField(ranks=ranks, support=support, tail=tail, meta=meta)
+    meta["tail_max"] = None if (tail is None and not tails) else TAIL_MAX
+    stored = ([1.0] if tail is not None else []) + sorted(tails)
+    meta["tail_temperatures"] = stored
+    meta["max_tail_at_temperature"] = [(0.0 if exhaustive else (max_tail if t == 1.0 else max_tails[t]))
+                                       for t in stored]
+    return RankField(ranks=ranks, support=support, tail=tail, meta=meta, tails=tails or None)
 
 
 def encode_regions(logits: torch.Tensor, *, clip: float = CLIP, threshold: float = 0.0,

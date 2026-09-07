@@ -183,10 +183,32 @@ def _quantize_margin(m: torch.Tensor, clip: float) -> torch.Tensor:
     return q.round().clamp(1, SUPPORT_MAX).to(torch.uint8)
 
 
-def probabilities(code: RankField) -> tuple[np.ndarray, np.ndarray]:
-    """``(class_ids, p)`` for the stored channels; absent classes get id -1 and p 0.
-    Ranked: ``p_j = exp(-g_j) / Z`` with ``Z = Z_kept / (1 - tail)``; regions: sigmoids."""
+def tail_at(code: RankField, temperature: float = 1.0):
+    """The stored dropped-mass plane at ``temperature`` (uint16 over ``tail_max``), or None for
+    an exhaustive field. Raises when the field is not exhaustive and no tail was stored at
+    that temperature: renormalizing with the wrong one would misstate every probability."""
+    t = float(temperature)
+    if code.meta.get("exhaustive"):
+        return None
+    if t == 1.0 and code.tail is not None:
+        return code.tail
+    if code.tails and t in code.tails:
+        return code.tails[t]
+    have = ([1.0] if code.tail is not None else []) + sorted(code.tails or {})
+    raise ValueError(f"no tail stored at temperature {t:g} (stored: {have or 'none'}); the mass "
+                     f"of the dropped classes at that temperature is not recoverable")
+
+
+def probabilities(code: RankField, temperature: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """``(class_ids, p)`` for the stored channels at ``temperature``; absent classes get id
+    -1 and p 0. Ranked: ``p_j = exp(-g_j / T) / Z`` with ``Z = Z_kept / (1 - tail_T)`` - the
+    stored classes carry ``1 - tail_T`` of the mass and the tail is the rest, so a consumer
+    sums to one only by counting the tail as one more target (docs/format.md,
+    "Distillation"). Needs a tail stored at ``T`` (:func:`tail_at`); regions: sigmoids."""
     _host(code, "probabilities")
+    T = float(temperature)
+    if not T > 0:
+        raise ValueError(f"temperature must be positive, got {temperature}")
     if code.meta.get("mode") == "regions":
         m = np.stack([margin(code, c) for c in range(code.classes)])
         ids = np.broadcast_to(np.arange(code.classes, dtype=np.int64)[:, None, None, None], m.shape)
@@ -194,13 +216,14 @@ def probabilities(code: RankField) -> tuple[np.ndarray, np.ndarray]:
     lut = levels(code.meta)
     gaps = np.concatenate([np.zeros((1, *code.support.shape[1:]), np.float32),
                            lut[code.support]], axis=0)
-    w = np.exp(-gaps)
+    w = np.exp(-gaps / T)
     ids = code.ranks.astype(np.int64) - 1
     w[ids < 0] = 0.0
     z = w.sum(axis=0)
-    if code.tail is not None:
+    tail = tail_at(code, T)
+    if tail is not None:
         tail_max = float(code.meta.get("tail_max") or TAIL_MAX)   # the uint16 quantum
-        z = z / np.clip(1.0 - code.tail.astype(np.float32) / tail_max, 1e-6, None)
+        z = z / np.clip(1.0 - np.asarray(tail).astype(np.float32) / tail_max, 1e-6, None)
     p = w / z
     p[ids < 0] = 0.0
     return ids, p

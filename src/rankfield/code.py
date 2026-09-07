@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-FORMAT_VERSION = "0.3"
+FORMAT_VERSION = "0.4"
 GAP_UNIT = "logit"       # what gaps, levels, the clip and the range are measured in for a softmax head
 CLIP = 8.0               # non-winners farther behind than this are not kept
 DEFAULT_DEPTH = 6        # planes; the shell never needed more than 6 on real anatomy
@@ -61,6 +61,7 @@ class RankField:
     labels: list | None = None
     geometry: object | None = None       # rankfield.geometry.Geometry of the stored array
     frame: dict | None = None            # Frame.to_meta()
+    tails: dict | None = None            # {temperature: uint16 plane} beyond the T=1 `tail` (format 0.4)
 
     @property
     def depth(self) -> int:

@@ -179,6 +179,27 @@ class TestFields:
         ids, p = rf.probabilities(code)
         np.testing.assert_allclose(p.sum(0) + code.tail / 65535.0, 1.0, atol=2.0 / 65535)
 
+    def test_the_default_encode_asks_for_the_one_temperature_of_format_0_3(self):
+        code = rf.encode(logits(K=12), depth=3)
+        assert code.meta["tail_temperatures"] == [1.0] and code.tails is None
+        assert code.tail is not None and rf.tail_at(code, 1.0) is code.tail
+
+    def test_a_second_temperature_measures_the_mass_dropped_at_that_temperature(self):
+        lg, T = logits(K=12), 4.0
+        code = rf.encode(lg, depth=3, tail_temperatures=(1.0, T))
+        assert code.meta["tail_temperatures"] == [1.0, T]
+        np.testing.assert_array_equal(code.tail, rf.encode(lg, depth=3).tail)  # T=1 bytes unchanged
+        ids, _ = rf.probabilities(code)
+        soft = torch.softmax(lg.double() / T, 0).numpy()
+        live = ids >= 0
+        kept = np.where(live, np.take_along_axis(soft, np.where(live, ids, 0), axis=0), 0.0).sum(0)
+        np.testing.assert_allclose(rf.tail_at(code, T) / 65535.0 + kept, 1.0, atol=1e-3)
+
+    def test_a_temperature_that_is_not_positive_is_refused(self):
+        for bad in (0.0, -1.0):
+            with pytest.raises(ValueError, match="must be positive"):
+                rf.encode(logits(K=6), depth=3, tail_temperatures=(bad,))
+
     def test_deficit_is_the_logits_up_to_a_per_voxel_constant(self):
         lg = logits(K=6)
         code = rf.encode(lg, depth=6, clip=40.0, gap_range=64.0)
