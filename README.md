@@ -32,7 +32,12 @@ and the restore's blend; `zarr` is the `store` extra; triton (>= 3.0) is the CUD
 Python 3.12 or newer.
 
     uv sync --extra test           # from a checkout; brings duckn, so the store tests run
-    pip install "rankfield[torch] @ git+https://github.com/mhalle/rankfield.git@v0.3.1"
+    pip install "rankfield[torch] @ git+https://github.com/mhalle/rankfield.git@TAG"
     pytest tests
+
+`TAG` is a release tag, not a placeholder to drop: the banner above means what it says, so
+pin one rather than tracking `main`. `git ls-remote --tags https://github.com/mhalle/rankfield.git`
+lists them, and `CHANGELOG.md` says what each one changed. No version is named here on
+purpose - one written into this page is wrong by the next release, which is how it went.
 
 Apache-2.0.
