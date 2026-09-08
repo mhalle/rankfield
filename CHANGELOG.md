@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 - 2026-09-07
+
+- A multi-part restore compared two FRAMED parts' placement with `==` on the nested frame
+  record, while two UNFRAMED parts were compared with a tolerance on origin and directions -
+  the same geometric question answered two ways, and the exact way was the one handling the
+  record with the most chances to differ innocently. Parts being composited can derive their
+  frame independently from the same input, and a number off by one ULP, or a sequence a
+  producer built as a tuple where `Frame.to_meta` emits a list, was refused as a different
+  placement. `[6, 10, 12] != (6, 10, 12)` needs no arithmetic to happen. The comparison
+  walks the record now: numbers to `np.isclose`'s tolerance, which is what the unframed
+  branch already used, sequences element-wise whatever their container, an absent key as
+  null, and everything else exactly.
+- The placement check had no test in either branch. `tests/test_placement.py` covers what
+  counts as one placement and what does not, both framed and unframed.
+
 ## 0.3.0 - 2026-09-07
 
 `Geometry` is one order now. It used to pack array-order quantities (`spacing_zyx`,

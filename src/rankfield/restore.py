@@ -88,6 +88,34 @@ def resolve_grid(part: Part, grid) -> tuple[Grid, Frame | None]:
     return Grid.isotropic(float(grid), like=array_grid(part)), None
 
 
+def _same_record(a, b) -> bool:
+    """Whether two frame records describe the same placement.
+
+    Structural, not ``==``. A frame record is JSON - nested dicts, sequences, numbers - and
+    parts being composited may have derived theirs independently from the same input, so a
+    number that differs in its last bit, or a sequence a producer built as a tuple where
+    :meth:`Frame.to_meta` emits a list, is the SAME placement. Exact equality refused both,
+    while two UNFRAMED parts were already compared with a tolerance - the same geometric
+    question answered two ways, and the strict way was the one handling the richer record.
+    Numbers compare to ``np.isclose``'s tolerance, which is what the unframed branch uses;
+    strings, bools and None compare exactly. A key absent on one side reads as None, so an
+    omitted optional field matches one written as null.
+    """
+    if isinstance(a, dict) or isinstance(b, dict):
+        if not (isinstance(a, dict) and isinstance(b, dict)):
+            return False
+        return all(_same_record(a.get(k), b.get(k)) for k in set(a) | set(b))
+    if isinstance(a, (list, tuple)) or isinstance(b, (list, tuple)):
+        if not (isinstance(a, (list, tuple)) and isinstance(b, (list, tuple))) or len(a) != len(b):
+            return False
+        return all(_same_record(x, y) for x, y in zip(a, b))
+    if isinstance(a, bool) or isinstance(b, bool):          # bool is an int; decide it first
+        return a is b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return bool(np.isclose(a, b))
+    return a == b
+
+
 def _same_placement(a: Part, b: Part) -> bool:
     ga, gb = a.field.geometry, b.field.geometry
     if bool(a.field.frame) != bool(b.field.frame):
@@ -97,7 +125,7 @@ def _same_placement(a: Part, b: Part) -> bool:
         skip = ("model_shape", "model_spacing")
         fa = {k: v for k, v in a.field.frame.items() if k not in skip}
         fb = {k: v for k, v in b.field.frame.items() if k not in skip}
-        return fa == fb
+        return _same_record(fa, fb)
     return (np.allclose(ga.origin, gb.origin) and np.allclose(ga.directions, gb.directions)
             and tuple(a.field.ranks.shape[1:]) == tuple(b.field.ranks.shape[1:]))
 
