@@ -241,6 +241,38 @@ On the fields behind the table above the two disagree at 0.0000 % of voxels, so 
 is still a good check on the kernels - but it is not the definition of what the restore
 computes, and a test that compares the two cannot tell the rules apart.
 
+*Encoding is reproducible across devices, except the tail's last unit.*
+
+The RANK and SUPPORT planes are exact on the CPU, MPS and CUDA. They are decided by
+COMPARISONS - which class wins, which is nearer, which survives the depth cut - and a
+comparison is exact even when the values feeding it are not, so the decisions do not inherit
+the backend's arithmetic. The depth cut breaks ties by class index and the tail sums in class
+order, so neither depends on a reduction order either.
+
+The TAIL plane is not exact, and cannot be. It quantizes a computed float into a uint16, and
+that float comes from `exp()`, which is the device's own. This is not a reduction-order
+effect - the usual explanation for CPU/GPU divergence, and the one the ordered sum already
+removes - but the function itself. IEEE 754 requires correct rounding only for `+ - * /` and
+`sqrt`; everything outside it is implementation-defined. CUDA documents `expf` at a maximum
+error of **2 ULP** and implements it on the multi-function unit's hardware `exp2`
+approximation, so it is a different function from a CPU libm's, by design and within spec.
+PyTorch says the same at its own level: results may not be reproducible between CPU and GPU
+executions, even with identical seeds.
+
+Measured: `exp` differs between the CPU and an A10 on about a third of a sampled range, at
+most half a float32 ULP near 1.0, well inside CUDA's 2 ULP budget. Through the encoder that
+moves the tail by one unit at 1 voxel in 594 of a tie-heavy field - the same at 0.2.1, 0.2.2,
+0.2.4 and 0.3.1, so it is a property of the arithmetic, not a regression. One unit is 1/65535
+of the dropped mass, far under the gap byte's own quantum.
+
+The consequence to plan around: a store written on a GPU is not byte-identical to one written
+on a CPU. Do not content-address a store and expect a hit across machines, and record the
+device beside any statistic derived from `probabilities()` or the tail.
+
+  - CUDA Programming Guide, mathematical functions (Table 48, and "Functions defined outside
+    the IEEE-754 standard are not guaranteed to be correctly rounded")
+  - PyTorch, "Reproducibility" (torch.org notes/randomness)
+
 *Bit-exactness.* The torch path, the Metal kernel and the Triton kernel make the same
 decisions bit for bit: the same corner order, the same weight products, fused multiply-add
 off, levels from the table. Measured on the torso (52.5 M output voxels): 0 differing

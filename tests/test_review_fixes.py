@@ -57,7 +57,13 @@ class TestEncodingIsTheSameEverywhere:
         b = rf.encode(lg.to(dev), depth=6)
         np.testing.assert_array_equal(a.ranks, b.ranks)
         np.testing.assert_array_equal(a.support, b.support)
-        np.testing.assert_array_equal(a.tail, b.tail)
+        # The tail is not exact and cannot be: ordering the sum removes the reduction order,
+        # but exp() is the device's own and CUDA's differs from the CPU's by an ulp, so a
+        # value on a rounding boundary lands one unit either side (format.md, "The restore").
+        # The bound is what is guaranteed - one unit, at a handful of voxels.
+        off = np.abs(a.tail.astype(np.int64) - b.tail.astype(np.int64))
+        assert off.max() <= 1, f"the tail moved by {off.max()} units, not a rounding boundary"
+        assert (off > 0).mean() < 0.01, f"the tail differs at {100 * (off > 0).mean():.1f} % of voxels"
 
     def test_the_cut_takes_the_lowest_indices_among_equal_keys(self):
         lg = torch.zeros(6, 1, 1, 1)

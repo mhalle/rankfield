@@ -19,6 +19,8 @@ without ever materializing the K-channel volume.
 - `restore`: labels on any grid from `Part`s, with a Metal and a Triton kernel that agree
   with the torch path bit for bit.
 - `rankfield.store`: read and write the portable zarr v3 store.
+- `tools/cuda_check.py`: the suite on a CUDA box, through Modal - the Triton kernel is the
+  one path no laptop here can run.
 
 The restore is an approximation, and the format document says how good. On a synthetic field
 built to stress it - 12 classes, heavy noise - labels differ from the interpolated original
@@ -29,8 +31,8 @@ numpy is all the decoders need. torch is the `torch` extra, for `encode`, `decod
 and the restore's blend; `zarr` is the `store` extra; triton (>= 3.0) is the CUDA kernel.
 Python 3.12 or newer.
 
-    uv sync --extra test           # from a checkout
-    pip install "rankfield[torch] @ git+https://github.com/mhalle/rankfield.git@v0.2.1"
+    uv sync --extra test           # from a checkout; brings duckn, so the store tests run
+    pip install "rankfield[torch] @ git+https://github.com/mhalle/rankfield.git@v0.3.1"
     pytest tests
 
 Apache-2.0.

@@ -229,9 +229,15 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             support[:, z0:z1] = sup.to(torch.uint8).cpu().numpy()
         ranks[:, z0:z1] = r.cpu().numpy().astype(rdt, copy=False)
         if tail is not None:
-            # summed in class order, one add at a time: a device's own reduction order would
-            # move the rounded byte by one between machines, and a store's bytes must not
-            # depend on where they were written
+            # Summed in class order, one add at a time: a device's own reduction order would
+            # move the rounded value between machines. That buys the RANK and SUPPORT planes
+            # exactly - they are decided by comparisons, which are exact even when the values
+            # are not - but it cannot buy the tail, which quantizes a float that came out of
+            # exp(). IEEE 754 requires correct rounding for + - * / and sqrt and nothing else;
+            # CUDA documents expf at 2 ULP, on the multi-function unit's hardware exp2. So the
+            # uint16 tail can land one unit either side of a rounding boundary - 1 voxel in
+            # 594 on a tie-heavy field, unchanged since 0.2.1, and 1/65535 is far under the
+            # gap byte's own quantum. docs/format.md, "The restore", carries the citations.
             kept_mass = torch.exp(-g_sel)
             kept_mass[~kept] = 0.0
             t = ((z_full - _ordered_sum(kept_mass)) / z_full).clamp(0, 1)

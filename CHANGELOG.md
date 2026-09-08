@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.2 - 2026-09-08
+
+Tooling and one corrected claim. No encoder or decoder change; no bytes move.
+
+- `tools/cuda_check.py` runs the suite on a CUDA box through Modal, mounting the working
+  tree rather than a tag. The Triton kernel is the one path no machine here can execute, and
+  it is where a defect survives longest - the uint16 bounds check fixed in 0.3.0 was dead on
+  CUDA too, which only a GPU run showed.
+- Its first run found that the tail plane differs between the CPU and CUDA. Ordering the sum
+  removes a backend's reduction order, which is what 0.1.1 fixed, but `exp()` is the device's
+  own: CUDA's differs from the CPU's by a float32 ulp on about a third of a sampled range, so
+  a value on a rounding boundary lands one unit either side. Measured at 1 voxel in 594 on a
+  tie-heavy field and identical at 0.2.1, 0.2.2, 0.2.4 and 0.3.1, so it is not a regression -
+  it was never visible because no CUDA machine ran the tests. It is also within spec, not a
+  torch defect: IEEE 754 requires correct rounding only for `+ - * /` and `sqrt`, and CUDA
+  documents `expf` at a maximum error of 2 ULP on the multi-function unit's hardware `exp2`.
+  The measured difference is half a float32 ULP, inside that budget. `docs/format.md` carries
+  the citations. The RANK and SUPPORT planes,
+  decided by comparisons, are exact everywhere. The encoder's comment, `docs/format.md` and
+  the test now say that rather than claiming a store's bytes cannot depend on where they were
+  written. One unit is 1/65535 of the dropped mass, far under the gap byte's own quantum, but
+  a store written on a GPU is not byte-identical to one written on a CPU.
+- `duckn` is a dependency group with the tag haversack pins, so a clean `uv sync --extra test`
+  runs the four store-writer tests instead of skipping them. It is a group, not part of the
+  `test` extra, because a git source in published metadata would make `pip install
+  rankfield[test]` unresolvable.
+- README pinned v0.2.1, six releases stale.
+
 ## 0.3.1 - 2026-09-07
 
 - A multi-part restore compared two FRAMED parts' placement with `==` on the nested frame
