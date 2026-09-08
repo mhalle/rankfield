@@ -15,6 +15,18 @@ now takes them as they stand rather than normalizing into cosines and back. The 
 `canonical` record changes to `{shape, directions, origin}`; a record with the old keys is
 refused with a message that says so. Breaking for every constructor call and field read.
 
+- More than 254 classes works on the GPU. `rank_dtype` widens the rank plane to uint16 at
+  255 classes, and both kernels' label-table bounds check reduced that plane with
+  `ranks.max()` - which torch implements on none of the three backends (`max_reduction_
+  ushort_ushort` on MPS, `max_all not implemented for UInt16` on the CPU, `max_all_cuda ...`
+  on CUDA). So the check raised before the kernel ran, on exactly the stores that need it. `backends.max_class()`
+  widens a chunk at a time instead, which also keeps the temporary off a whole-body part's
+  gigabyte. `tests/test_wide_ranks.py` covers the width from the encoder through the numpy
+  decoders, every device, the store and back; the output dtype follows the LABELS and the
+  rank dtype the CLASS COUNT, and the two are independent. Checked on Metal and, on a Modal
+  A10, on CUDA: the Triton restore of a 300- and a 600-class store is the CPU's, voxel for
+  voxel.
+
 ## 0.2.4 - 2026-09-07
 
 Documentation and tests; no encoder or decoder change, and no bytes move.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import max_class
 from .._torch import have_torch, no_grad, torch
 
 try:
@@ -229,9 +230,10 @@ def run_ranked(ranks: torch.Tensor, support: torch.Tensor, out: torch.Tensor, ta
     limit = 255 if out.dtype == torch.uint8 else 65535
     if int(np.max(lut)) > limit:
         raise ValueError(f"rankfield.backends.triton_gpu: a label of {int(np.max(lut))} does not fit {out.dtype}")
-    if len(lut) < int(ranks.max()):                    # the kernel indexes lut[class - 1] unchecked
+    top = max_class(ranks)                            # the kernel indexes lut[class - 1] unchecked
+    if len(lut) < top:
         raise ValueError(f"rankfield.backends.triton_gpu: the label table has {len(lut)} entries for a class "
-                         f"{int(ranks.max())}")
+                         f"{top}")
     lv = np.ascontiguousarray(levels, dtype=np.float32)
     if lv.shape != (256,):
         raise ValueError("rankfield.backends.triton_gpu: levels must be a 256-entry table")
