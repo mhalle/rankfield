@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 - 2026-09-07
+
+`Geometry` is one order now. It used to pack array-order quantities (`spacing_zyx`,
+`shape_zyx`) beside world-order ones (`origin_xyz`, a row-major 3x3 `direction_xyz` of
+cosines by column x, y, z) - SimpleITK's fields next to numpy's array - and every reader
+and writer of it reversed and transposed at the boundary. It is duckn's form, which is
+NRRD's: `shape` and `directions` per array axis in array order, each direction row a
+world-space vector whose length is the spacing, and `origin` a world point; `spacing`,
+`cosines`, the 4x4 `matrix` and `world()` are derived. `Geometry.aligned(shape, spacing,
+origin)` is the axis-aligned case; `regrid` is the same orientation on another grid.
+No bytes move in a store: its arrays already carried exactly these rows, and the reader
+now takes them as they stand rather than normalizing into cosines and back. The frame's
+`canonical` record changes to `{shape, directions, origin}`; a record with the old keys is
+refused with a message that says so. Breaking for every constructor call and field read.
+
 ## 0.2.4 - 2026-09-07
 
 Documentation and tests; no encoder or decoder change, and no bytes move.

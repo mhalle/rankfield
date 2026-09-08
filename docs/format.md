@@ -225,6 +225,12 @@ source space exactly as the pipeline composed the mapping; or only its array geo
 restores onto grids in its own array frame (voxel 0 at 0 mm, true spacing). All parts of a
 multi-part restore share one placement.
 
+A geometry is duckn's, which is NRRD's: per array axis, in array order, a world-space
+direction vector from one sample to the next (its length is the spacing), plus the world
+position of sample (0, 0, 0). World is LPS millimeters. It is the same record the store's
+arrays carry in their duckn attributes and the frame carries as ``canonical``; spacing and
+direction cosines are derived from it, never stored beside it in another order.
+
 *The float64 reference is not candidate-restricted.* `reference.py` builds the whole
 K-channel dense field, in which a class stored at NO corner still reads `-clip` and can win the
 argmax. `restore()` considers only the classes stored at the eight corners. The two implement

@@ -12,7 +12,7 @@ def part(code, labels=None, spacing=(2.0, 2.0, 2.0), name="p"):
     K = code.classes
     code.labels = list(range(K)) if labels is None else list(labels)
     shape = tuple(code.ranks.shape[1:])
-    code.geometry = rf.Geometry(spacing_zyx=spacing, shape_zyx=shape)
+    code.geometry = rf.Geometry.aligned(shape, spacing)
     return rf.Part(field=code, name=name)
 
 
@@ -123,7 +123,7 @@ def test_two_parts_must_share_a_placement():
     a = rf.encode(logits(K=3, shape=(6, 6, 6), seed=1), depth=3)
     b = rf.encode(logits(K=3, shape=(6, 6, 6), seed=2), depth=3)
     pa, pb = part(a, name="a"), part(b, name="b")
-    pb.field.geometry = rf.Geometry(spacing_zyx=(2.0, 2.0, 2.0), shape_zyx=(6, 6, 6), origin_xyz=(5.0, 0.0, 0.0))
+    pb.field.geometry = rf.Geometry.aligned((6, 6, 6), 2.0, origin=(5.0, 0.0, 0.0))
     with pytest.raises(ValueError, match="placement"):
         rf.restore([pa, pb], grid=2.0)
 

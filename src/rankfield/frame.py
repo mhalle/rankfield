@@ -28,8 +28,8 @@ class Frame:
 
     ``source`` is the canonical-orientation source image grid in a *local* frame
     (voxel (0, 0, 0) at 0 mm, spacing = the image's spacing, (Z, Y, X) order);
-    ``canonical`` places that local frame in world space (the SimpleITK geometry of
-    the RAS-reoriented image: origin and direction cosines), and
+    ``canonical`` places that local frame in world space (the :class:`Geometry` of
+    the RAS-reoriented image: world origin and a direction vector per array axis), and
     ``original_orientation`` is the input's own orientation code, so the output can
     be written back in the frame the caller supplied. ``model_shape`` is the
     model-grid shape the forward resampler produced from ``source`` under
@@ -98,10 +98,7 @@ class Frame:
                 "model_spacing": [float(v) for v in self.model_spacing],
                 "convention": self.convention,
                 "original_orientation": self.original_orientation,
-                "canonical": {"spacing_zyx": [float(v) for v in c.spacing_zyx],
-                              "shape_zyx": [int(v) for v in c.shape_zyx],
-                              "origin_xyz": [float(v) for v in c.origin_xyz],
-                              "direction_xyz": [float(v) for v in c.direction_xyz]}}
+                "canonical": c.to_meta()}
 
     @classmethod
     def from_meta(cls, meta: dict) -> "Frame":
@@ -111,22 +108,15 @@ class Frame:
                    model_shape=tuple(meta["model_shape"]),
                    model_spacing=tuple(meta["model_spacing"]),
                    convention=meta["convention"],
-                   canonical=Geometry(**{k: tuple(v) for k, v in meta["canonical"].items()}),
+                   canonical=Geometry.from_meta(meta["canonical"]),
                    original_orientation=meta.get("original_orientation", "RAS"),
                    model_source=_grid_from(meta.get("model_source")))
 
     def output_geometry(self, grid: Grid):
-        """SimpleITK geometry for labels on ``grid``, in the canonical frame.
+        """Geometry of labels on ``grid``, in the canonical frame.
 
-        The grid's origin is an offset in the source's local (Z, Y, X) millimeter frame;
-        world position is the canonical origin plus that offset rotated by the direction
-        cosines, so an oblique acquisition keeps its orientation.
+        The grid's origin is an offset in the source's local (Z, Y, X) millimeter frame, along
+        the canonical geometry's own axes, so an oblique acquisition keeps its orientation.
         """
-        from .geometry import Geometry
-        d = np.asarray(self.canonical.direction_xyz, dtype=np.float64).reshape(3, 3)
-        offset_xyz = np.asarray(grid.origin, dtype=np.float64)[::-1] - np.asarray(self.source.origin)[::-1]
-        origin = np.asarray(self.canonical.origin_xyz, dtype=np.float64) + d @ offset_xyz
-        return Geometry(spacing_zyx=tuple(float(x) for x in grid.spacing),
-                        shape_zyx=tuple(int(x) for x in grid.shape),
-                        origin_xyz=tuple(float(x) for x in origin),
-                        direction_xyz=tuple(float(x) for x in self.canonical.direction_xyz))
+        offset = np.asarray(grid.origin, dtype=np.float64) - np.asarray(self.source.origin)
+        return self.canonical.regrid(grid.shape, grid.spacing, offset=offset)

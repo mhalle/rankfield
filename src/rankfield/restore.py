@@ -61,7 +61,7 @@ def array_grid(part: Part) -> Grid:
     g = part.field.geometry
     return Grid(shape=tuple(int(v) for v in part.field.support.shape[1:]) if part.field.ranks is None
                 else tuple(int(v) for v in part.field.ranks.shape[1:]),
-                spacing=tuple(float(v) for v in g.spacing_zyx))
+                spacing=g.spacing)
 
 
 def mapping_of(part: Part, grid: Grid) -> Mapping:
@@ -98,28 +98,18 @@ def _same_placement(a: Part, b: Part) -> bool:
         fa = {k: v for k, v in a.field.frame.items() if k not in skip}
         fb = {k: v for k, v in b.field.frame.items() if k not in skip}
         return fa == fb
-    return (np.allclose(ga.origin_xyz, gb.origin_xyz) and np.allclose(ga.direction_xyz, gb.direction_xyz)
-            and np.allclose(ga.spacing_zyx, gb.spacing_zyx)
+    return (np.allclose(ga.origin, gb.origin) and np.allclose(ga.directions, gb.directions)
             and tuple(a.field.ranks.shape[1:]) == tuple(b.field.ranks.shape[1:]))
 
 
 def output_geometry(part: Part, grid: Grid, fr: Frame | None, box) -> Geometry:
-    """World placement of the labels on ``grid`` (or of its ``box``), canonical orientation."""
-    if fr is not None:
-        geo = fr.output_geometry(grid)
-        D = np.asarray(geo.direction_xyz).reshape(3, 3)
-        origin = np.asarray(geo.origin_xyz)
-        direction = geo.direction_xyz
-    else:
-        g = part.field.geometry
-        D = np.asarray(g.direction_xyz).reshape(3, 3)
-        origin = np.asarray(g.origin_xyz) + D @ np.asarray(grid.origin, float)[::-1]
-        direction = g.direction_xyz
-    off_xyz = np.asarray([box[2][0], box[1][0], box[0][0]], float) * np.asarray(grid.spacing)[::-1]
-    return Geometry(spacing_zyx=tuple(float(v) for v in grid.spacing),
-                    shape_zyx=tuple(b - a for a, b in box),
-                    origin_xyz=tuple(float(v) for v in origin + D @ off_xyz),
-                    direction_xyz=tuple(float(v) for v in direction))
+    """World placement of the labels on ``grid`` (or of its ``box``), canonical orientation.
+    An unframed part's grid is in its own array frame, so the grid's origin is an offset
+    along the stored array's axes."""
+    geo = (fr.output_geometry(grid) if fr is not None
+           else part.field.geometry.regrid(grid.shape, grid.spacing, offset=grid.origin))
+    start = np.asarray([a for a, _ in box], float) * np.asarray(grid.spacing)
+    return geo.regrid(tuple(b - a for a, b in box), grid.spacing, offset=start)
 
 
 def roi_of(parts, extents, grid_out: Grid, *, halo: int = 1) -> tuple:

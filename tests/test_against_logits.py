@@ -17,7 +17,7 @@ from conftest import logits
 
 def _part(code, spacing=(2.0, 2.0, 2.0)):
     code.labels = list(range(code.classes))
-    code.geometry = rf.Geometry(spacing_zyx=spacing, shape_zyx=tuple(code.ranks.shape[1:]))
+    code.geometry = rf.Geometry.aligned(tuple(code.ranks.shape[1:]), spacing)
     return rf.Part(field=code)
 
 

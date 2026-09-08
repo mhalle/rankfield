@@ -57,8 +57,8 @@ def open_group(path, mode: str = "r"):
 # ----------------------------------------------------------------------------------------
 
 def array_geometry(arr) -> Geometry:
-    """The stored array's own placement, from its duckn attributes, in SimpleITK's terms
-    (LPS, direction cosines by column x, y, z)."""
+    """The stored array's own placement, from its duckn attributes: the same per-axis
+    rows, in LPS."""
     d = arr.attrs.asdict()["duckn"]
     axes = [a for a in d["axes"] if a.get("space_direction")]
     if len(axes) != 3:
@@ -67,14 +67,10 @@ def array_geometry(arr) -> Geometry:
     if space not in _SPACE_TO_LPS:
         raise ValueError(f"ranks array: space {space!r} is not one this reader places")
     flip = np.asarray(_SPACE_TO_LPS[space])
-    dirs = [np.asarray(a["space_direction"], float) * flip for a in axes]      # z, y, x in LPS
-    spacing = [float(np.linalg.norm(v)) for v in dirs]
-    cos = [v / n for v, n in zip(dirs, spacing)]
-    D = np.stack([cos[2], cos[1], cos[0]], axis=1)                              # columns x, y, z
+    rows = [tuple(float(v) for v in np.asarray(a["space_direction"], float) * flip) for a in axes]
     origin = np.asarray(d.get("space_origin", (0.0, 0.0, 0.0)), float) * flip
-    return Geometry(spacing_zyx=tuple(spacing), shape_zyx=tuple(int(v) for v in arr.shape[1:]),
-                    origin_xyz=tuple(float(v) for v in origin),
-                    direction_xyz=tuple(float(v) for v in D.reshape(-1)))
+    return Geometry(shape=tuple(int(v) for v in arr.shape[1:]), directions=tuple(rows),
+                    origin=tuple(float(v) for v in origin))
 
 
 def part_indices(root) -> list[int]:
@@ -130,15 +126,13 @@ def tail_array_name(temperature: float) -> str:
 def _grid_attrs(geo: Geometry, *, list_axis: bool, centering: str) -> dict:
     from duckn import AxisMetadata, DucknMetadata
     from duckn.models import duckn_attrs
-    D = np.asarray(geo.direction_xyz, float).reshape(3, 3)
-    cols = [D[:, 2], D[:, 1], D[:, 0]]                              # array axes Z, Y, X
     axes = [AxisMetadata(kind="space", centering=centering, unit="mm",
-                         space_direction=[round(float(v), 9) for v in (c * s)])
-            for c, s in zip(cols, geo.spacing_zyx)]
+                         space_direction=[round(float(v), 9) for v in row])
+            for row in geo.directions]
     if list_axis:
         axes = [AxisMetadata(kind="list")] + axes
     return duckn_attrs(DucknMetadata(version=DUCKN_VERSION, space="left-posterior-superior",
-                                     space_origin=[float(v) for v in geo.origin_xyz], axes=axes))
+                                     space_origin=list(geo.origin), axes=axes))
 
 
 def _block_attrs(block: dict) -> dict:

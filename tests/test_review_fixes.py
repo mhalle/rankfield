@@ -87,7 +87,7 @@ class TestRestoreRefuses:
     def _part(self, labels):
         code = rf.encode(logits(K=5, shape=(6, 7, 8)), depth=4)
         code.labels = labels
-        code.geometry = rf.Geometry(spacing_zyx=(2.0, 2.0, 2.0), shape_zyx=(6, 7, 8))
+        code.geometry = rf.Geometry.aligned((6, 7, 8), 2.0)
         return rf.Part(field=code)
 
     @pytest.mark.parametrize("dev", devices())
@@ -103,10 +103,10 @@ class TestRestoreRefuses:
         def framed(src_n, seed):
             code = rf.encode(logits(K=3, shape=(6, 6, 6), seed=seed), depth=3)
             code.labels = [0, 1, 2]
-            code.geometry = rf.Geometry(spacing_zyx=(2.0, 2.0, 2.0), shape_zyx=(6, 6, 6))
+            code.geometry = rf.Geometry.aligned((6, 6, 6), 2.0)
             fr = rf.Frame(source=rf.Grid(shape=(src_n,) * 3, spacing=(1.0, 1.0, 1.0)),
                           model_shape=(6, 6, 6), model_spacing=(2.0, 2.0, 2.0), convention="corner",
-                          canonical=rf.Geometry(spacing_zyx=(1.0, 1.0, 1.0), shape_zyx=(src_n,) * 3))
+                          canonical=rf.Geometry.aligned((src_n,) * 3, 1.0))
             code.frame = fr.to_meta()
             return rf.Part(field=code)
         with pytest.raises(ValueError, match="placement"):

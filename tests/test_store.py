@@ -14,8 +14,8 @@ pytest.importorskip("duckn")
 def _parts():
     a = rf.encode(logits(K=5, shape=(7, 9, 11), seed=1), depth=4)
     a.labels = [0, 10, 11, 12, 13]
-    a.geometry = rf.Geometry(spacing_zyx=(3.0, 2.0, 2.0), shape_zyx=(7, 9, 11), origin_xyz=(1.0, -2.0, 5.0),
-                             direction_xyz=(0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0))
+    a.geometry = rf.Geometry(shape=(7, 9, 11), origin=(1.0, -2.0, 5.0),        # an oblique array
+                             directions=((0.0, 0.0, 3.0), (2.0, 0.0, 0.0), (0.0, -2.0, 0.0)))
     b = rf.encode(logits(K=3, shape=(7, 9, 11), seed=2), depth=3)
     b.labels = [0, 20, 21]
     b.geometry = a.geometry
@@ -33,9 +33,8 @@ def test_write_then_read_round_trips_the_parts_and_the_restore(tmp_path, suffix)
         np.testing.assert_array_equal(np.asarray(q.field.support[:]), p.field.support)
         assert q.field.labels == p.field.labels
         g, h = p.field.geometry, q.field.geometry
-        np.testing.assert_allclose(h.origin_xyz, g.origin_xyz)
-        np.testing.assert_allclose(h.spacing_zyx, g.spacing_zyx)
-        np.testing.assert_allclose(h.direction_xyz, g.direction_xyz, atol=1e-9)
+        np.testing.assert_allclose(h.origin, g.origin)
+        np.testing.assert_allclose(h.directions, g.directions, atol=1e-9)
         assert q.field.meta["version"] == p.field.meta["version"]
     grid = rf.Grid.isotropic(1.5, like=rf.array_grid(parts[0]))
     np.testing.assert_array_equal(rf.restore(back, grid=grid).labels, rf.restore(parts, grid=grid).labels)
