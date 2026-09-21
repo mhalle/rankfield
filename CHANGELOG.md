@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- duckn is pinned at `v0.4.0` (seg extension 0.8). Nothing here changes: the store writer uses
+  duckn's geometry models and the `ranked` extension block, which 0.4.0 leaves as they were,
+  and the store tests pass against it.
+
 ## 0.3.2 - 2026-09-08
 
 Tooling and one corrected claim. No encoder or decoder change; no bytes move.
