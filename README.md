@@ -14,6 +14,8 @@ without ever materializing the K-channel volume.
 - `docs/format.md` is the specification: what is stored, the level table, the keep rule,
   what that rule does NOT promise and what it costs, the two fields, the restore and its
   rules, with the measurements behind each.
+- `docs/overview.md` is the same in one page, for someone who ships a segmentation tool:
+  the vocabulary, the knobs and their defaults, and the measured limits.
 - `rankfield.encode` / `encode_regions`: logits -> `RankField`.
 - `margin`, `deficit`, `decode_groups`, `probabilities`, `tail_at`: the fields.
 - `restore`: labels on any grid from `Part`s, with a Metal and a Triton kernel that agree
