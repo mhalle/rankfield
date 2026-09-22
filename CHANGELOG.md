@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.3 - 2026-09-22
 
 - duckn is pinned at `v0.5.1` (seg extension 0.9). Nothing here changes: the store writer uses
   duckn's geometry models and the `ranked` extension block, which 0.4.0 leaves as they were,
   and the store tests pass against it.
+- The README names no release in its install line; `TAG` is a release tag, listed by
+  `git ls-remote --tags`, so the page is not wrong by the next release.
 
 ## 0.3.2 - 2026-09-08
 
