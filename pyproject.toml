@@ -24,7 +24,7 @@ test = ["pytest>=8", "torch>=2.7", "zarr>=3.3"]
 dev = ["duckn>=0.3"]
 
 [tool.uv.sources]
-duckn = { git = "https://github.com/mhalle/duckn.git", tag = "v0.5.0" }
+duckn = { git = "https://github.com/mhalle/duckn.git", tag = "v0.5.1" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rankfield"]

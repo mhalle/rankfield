@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- duckn is pinned at `v0.5.0` (seg extension 0.9). Nothing here changes: the store writer uses
+- duckn is pinned at `v0.5.1` (seg extension 0.9). Nothing here changes: the store writer uses
   duckn's geometry models and the `ranked` extension block, which 0.4.0 leaves as they were,
   and the store tests pass against it.
 
