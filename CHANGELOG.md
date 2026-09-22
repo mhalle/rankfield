@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4 - 2026-09-22
+
+- The house spelling is American, and a test holds it there: `tests/test_american_spelling.py`
+  (ported from haversack) scans every tracked text file for British forms, in prose and in
+  identifiers. The 28 that had drifted into the docs, docstrings and tests are respelled. No
+  public name, stored key or format field changes; no bytes move.
+
 ## 0.3.3 - 2026-09-22
 
 - duckn is pinned at `v0.5.1` (seg extension 0.9). Nothing here changes: the store writer uses
