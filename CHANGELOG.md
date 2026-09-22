@@ -88,7 +88,7 @@ Documentation and tests; no encoder or decoder change, and no bytes move.
   rejection stands, but the reason given was wrong. The floor is load-bearing for CANDIDATES -
   a class stored at some corners of the stencil and absent at others - not for classes dropped
   everywhere, which cannot be the answer at all. The union remedy's cost was also understated,
-  at 9.1 and 11.9 planes per voxel measured over a 6-neighbourhood where the rule says 26; it
+  at 9.1 and 11.9 planes per voxel measured over a 6-neighborhood where the rule says 26; it
   is 10.5 and 15.6.
 - `reference_restore` is not candidate-restricted and is not the definition of `restore`. It
   interpolates the whole K-channel dense field, so a class stored nowhere can win it. The two
@@ -121,7 +121,7 @@ the dense decoded field, where a class stored at no corner can win, rather than 
 candidate restore, where it cannot - is NOT addressed here. Re-measured through `restore()`
 the rejection stands (lowering the floor is ~3x worse on both fields), but the reason given
 in `docs/format.md` is wrong, and the union remedy's plane counts are understated because
-they were measured over a 6-neighbourhood where the rule says 26.
+they were measured over a 6-neighborhood where the rule says 26.
 
 ## 0.2.2 - 2026-09-07
 
@@ -151,7 +151,7 @@ at one corner and dropped at the next still reads at the `-clip` floor and can w
 interpolation it should lose. Both are now documented, measured and pinned rather than
 denied. `docs/format.md` gains "What the keep rule does not promise" with the label error by
 depth, the runner-up disagreement rate, and two remedies measured and rejected - lowering the
-floor is nearly 3x worse, and keeping the neighbours' kept set costs more planes than the
+floor is nearly 3x worse, and keeping the neighbors' kept set costs more planes than the
 depth that matches it.
 
 - `tests/test_against_logits.py` compares a restore against the ORIGINAL logits. Every other

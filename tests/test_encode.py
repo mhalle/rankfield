@@ -66,8 +66,8 @@ class TestPlanes:
 
 
 class TestShell:
-    def test_a_neighbouring_winner_is_kept_with_its_true_gap(self):
-        """The rule the bias fix rests on: whatever wins at any of the 26 neighbours is
+    def test_a_neighboring_winner_is_kept_with_its_true_gap(self):
+        """The rule the bias fix rests on: whatever wins at any of the 26 neighbors is
         present here, however far behind, so no stencil corner ever floors it."""
         lg = logits(K=10, shape=(8, 9, 9), noise=0.3)
         code = rf.encode(lg, depth=6, clip=8.0)
@@ -93,7 +93,7 @@ class TestShell:
     def test_the_shell_is_bounded_by_the_junction_and_fits_the_planes(self):
         """The largest shell is the number of winners meeting in a 3x3x3 block: 6 on real
         anatomy, more only on a random field like this one. Whatever it is, a depth of that
-        size keeps every neighbouring winner."""
+        size keeps every neighboring winner."""
         lg = logits(K=12, shape=(10, 12, 12))
         win = lg.argmax(0).numpy()
         Z, Y, X = win.shape

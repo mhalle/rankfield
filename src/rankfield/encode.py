@@ -1,13 +1,13 @@
 """The encoder: logits -> :class:`RankField`, in slabs on the logits' own device.
 
 What is kept per voxel (format 0.3, the ``shell`` rule): every class that wins at the
-voxel or at any of its 26 neighbours, with its true gap; then the closest non-winners
+voxel or at any of its 26 neighbors, with its true gap; then the closest non-winners
 within ``clip``; until the planes are full. Kept entries are ordered by gap, and dropped
 entries are the sentinel and come last (a reader may stop at the first one).
 
 Why: a class dropped by the clip is floored at ``-clip`` by the restore, an UPPER bound on
 its deficit, which over-credits it exactly where it matters - thin structures grew (a 12th
-rib by 19 %). Carrying the neighbours' winners narrows that, because a class that wins at
+rib by 19 %). Carrying the neighbors' winners narrows that, because a class that wins at
 one corner of an interpolation stencil is then present, with its gap, at every corner the
 depth has room for.
 
@@ -16,8 +16,8 @@ in ``tests/test_review_fixes.py`` and measured in the format document under "Wha
 rule does not promise":
 
 * ``ranks[1]`` is the nearest KEPT class, not always the true runner-up: shell classes take
-  the planes first, so a closer non-winner can be evicted by one that wins at a neighbour.
-* A 27-voxel neighbourhood can hold more winners than ``depth`` planes. The class dropped
+  the planes first, so a closer non-winner can be evicted by one that wins at a neighbor.
+* A 27-voxel neighborhood can hold more winners than ``depth`` planes. The class dropped
   then is the farthest shell class - never the winner, which the depth cut keeps.
 * A class kept at one corner and dropped at another still reads at the floor there, so it
   can still win an interpolation it should lose.
@@ -71,7 +71,7 @@ def settle_ties(top: torch.Tensor, idx: torch.Tensor, N: int) -> None:
 
 
 def _shell(win_ext: torch.Tensor, K: int, halo_lo: int, zs: int) -> torch.Tensor:
-    """``(K, zs, Y, X)`` bool: class c wins at the voxel or at one of its 26 neighbours.
+    """``(K, zs, Y, X)`` bool: class c wins at the voxel or at one of its 26 neighbors.
 
     ``win_ext`` is the winner map of the slab with one plane of halo on each side where the
     volume has one (``halo_lo`` says whether the first plane is halo). Edges replicate."""

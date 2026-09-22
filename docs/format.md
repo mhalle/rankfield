@@ -74,7 +74,7 @@ is what the keep rule below needs.
 
 Kept at a voxel, in this order, until the planes are full:
 
-1. every class that wins at the voxel or at any of its 26 neighbours, with its true gap,
+1. every class that wins at the voxel or at any of its 26 neighbors, with its true gap,
    however far behind it is here (byte 1 at least);
 2. then the non-winners within `clip`, closest first.
 
@@ -82,7 +82,7 @@ Kept entries are ordered by gap; dropped entries are the sentinel and come last.
 is the nearest KEPT class, which is the true runner-up only where the runner-up survived the
 depth cut - see "What the keep rule does not promise" below.
 
-Why: an interpolation stencil's eight corners are mutual neighbours, so a class that wins at
+Why: an interpolation stencil's eight corners are mutual neighbors, so a class that wins at
 one corner is present, with its gap, at every corner the depth has room for, and the restore
 does not score THAT class at the floor. Under the 0.2 rule a class dropped by the clip was
 floored at `-clip`, an UPPER bound on its deficit, which over-credited it exactly where it
@@ -96,11 +96,11 @@ mattered:
 
 Depth is measured, not chosen - on that case. The shell held at most 6 classes on the torso
 (1.18 on average) and never overflowed depth 6; depth 8 is the cap for the stencil (an output
-voxel consults at most 8 corners), depth 4 dropped a neighbouring winner at 141 voxels and
+voxel consults at most 8 corners), depth 4 dropped a neighboring winner at 141 voxels and
 still lost nothing at four decimals. Deeper planes are sentinel almost everywhere and cost
 bytes accordingly (nothing) and restore time on the CPU (a half more at 8 than at 6).
 
-That is one anatomy at one spacing. A 27-voxel neighbourhood can hold 27 distinct winners,
+That is one anatomy at one spacing. A 27-voxel neighborhood can hold 27 distinct winners,
 and how close a real model comes to that is a property of the model, not of the format.
 
 ## What the keep rule does not promise
@@ -109,10 +109,10 @@ The shell rule narrows the floor's bias. It does not bound it. Three things are 
 into the rule above, and none of them hold.
 
 **`ranks[1]` is not always the true runner-up.** Shell classes take the planes first, so a
-closer non-winner can be evicted by a class that wins at a neighbour and trails badly here.
+closer non-winner can be evicted by a class that wins at a neighbor and trails badly here.
 `margin()` then reports the lead over the nearest kept class, an upper bound on the true lead.
 
-**The shell can overflow.** When more classes win in the neighbourhood than the depth holds,
+**The shell can overflow.** When more classes win in the neighborhood than the depth holds,
 one is dropped. It is the farthest shell class, never the winner. The cut ranks shell classes
 under everything else by subtracting a constant of the format - `gap_range + 1`, with the
 key's gaps clamped at the range first, so no logit magnitude in the data can inflate it - and
@@ -163,7 +163,7 @@ All of these run through `restore()`, on the two fields above.
 |---|---|---|
 | current, depth 6 | 0.937 % at 5.7 planes | 5.234 % at 6.0 planes |
 | lower the floor to -1000 | 2.546 % at 5.7 | 15.017 % at 6.0 |
-| keep every class the neighbours kept | 0.155 % at 10.5 | 0.248 % at 15.6 |
+| keep every class the neighbors kept | 0.155 % at 10.5 | 0.248 % at 15.6 |
 | plain depth 10 | 0.159 % at 7.9 | 0.595 % at 9.9 |
 | plain depth 12 | 0.151 % at 12.0 | 0.285 % at 11.8 |
 | plain depth 16 | 0.151 % at 12.0 | 0.253 % at 15.1 |
@@ -176,8 +176,8 @@ works for CANDIDATES: a class stored at some corners of the stencil and absent a
 where it should. The same floor that hands a far class a win it should not have is what
 carries these, which is why the bias cannot simply be lowered away.
 
-*Keep every class the neighbours kept*, not just their winners: reaches 0.155 % and 0.248 %,
-but needs 10.5 and 15.6 planes per voxel over the 26-neighbourhood the rule specifies. Plain
+*Keep every class the neighbors kept*, not just their winners: reaches 0.155 % and 0.248 %,
+but needs 10.5 and 15.6 planes per voxel over the 26-neighborhood the rule specifies. Plain
 depth reaches the same error for the same or fewer planes - depth 10 and depth 16 in the
 table. The rule change buys nothing that depth does not buy more cheaply.
 

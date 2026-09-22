@@ -33,7 +33,7 @@ Per voxel, `depth` planes deep:
 |---|---|---|
 | **depth** | 6 | planes per voxel = how many classes can be kept. The one knob that trades size for accuracy. On real anatomy the rule below never needed more than 6 of 118. |
 | **clip** | 8 logits | two jobs. At encode: a non-winner further behind than this is not worth keeping. At restore: the level a class reads at a corner where it is absent - an *upper* bound on how badly it trails, which is what lets a genuinely close class win. |
-| **keep** | `shell` | which classes get the planes: (1) every class winning at this voxel **or any of its 26 neighbours**, at its true gap however far behind; then (2) the rest within `clip`, closest first. The neighbour part matters because an interpolation stencil's eight corners are mutual neighbours - so a class that wins anywhere in the cell is present, with a real number, at every corner. |
+| **keep** | `shell` | which classes get the planes: (1) every class winning at this voxel **or any of its 26 neighbors**, at its true gap however far behind; then (2) the rest within `clip`, closest first. The neighbor part matters because an interpolation stencil's eight corners are mutual neighbors - so a class that wins anywhere in the cell is present, with a real number, at every corner. |
 | **exhaustive** | derived | nothing was dropped, so no tail is needed to describe what was. |
 | **mode** | `ranked` | softmax head. `regions` is the sigmoid-head form: one signed byte per region, 128 exactly on the decision boundary, no ranks and no tail. |
 
@@ -58,7 +58,7 @@ group was supposed to dissolve.
 **tail at temperature.** A distillation at *T* = 0.4 needs the dropped mass measured at 0.4,
 and that cannot be recovered from the *T* = 1 plane. Temperatures are a **write-time**
 decision - adding one later means re-encoding from logits - and `tail_at()` refuses a
-temperature that was never written rather than substituting a neighbour, because
+temperature that was never written rather than substituting a neighbor, because
 renormalizing with the wrong tail misstates every probability.
 
 **restore** gives labels on any grid. Per output voxel: the candidates are the classes stored

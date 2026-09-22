@@ -14,7 +14,7 @@ byte constant for a byte-shuffling compressor.
 The byte -> gap map is a CURVE with a RANGE (format 0.3: ``log`` over 64 logits with a
 0.5-logit origin, fine near zero where boundaries live, coarse far out where nothing is
 decided) and the kept set is decided by a KEEP RULE (``shell``: every class that wins at
-the voxel or at one of its 26 neighbours, with its true gap; then the closest non-winners
+the voxel or at one of its 26 neighbors, with its true gap; then the closest non-winners
 within ``clip``; both while the planes last - what the depth cannot hold is dropped, and
 what is dropped reads at ``-clip``, so the keep rule bounds the error rather than
 eliminating it: docs/format.md, "What the keep rule does not promise"). Format 0.2 stores are the special case ``uniform`` over

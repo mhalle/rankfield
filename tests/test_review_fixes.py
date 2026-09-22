@@ -141,8 +141,8 @@ class TestSecondReview:
     """
 
     def _junction(self, step, K=7):
-        """K winners meeting at one voxel: the centre's own, and one per neighbour. The
-        centre's trailing classes sit ``step`` logits apart, so the depth cut has to tell
+        """K winners meeting at one voxel: the center's own, and one per neighbor. The
+        center's trailing classes sit ``step`` logits apart, so the depth cut has to tell
         gaps of that size apart to keep the winner."""
         lg = np.full((K, 3, 3, 3), -5.0)
         for c in range(K):
