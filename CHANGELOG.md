@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 - 2026-09-23
 
 Two defects found running a 0.625 mm CTPA through `lung_vessels` (K=5) on a 16 GB M2, and the
 same slab fix carried to the regions encoder. No bytes move: every change is to how much
