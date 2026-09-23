@@ -1,6 +1,8 @@
 """The decoders: planes -> fields. Every byte -> gap goes through :func:`levels`."""
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 
 from ._torch import torch
@@ -8,9 +10,41 @@ from .code import SUPPORT_MAX, TAIL_MAX, ZERO_LEVEL, RankField, levels
 
 
 def _host(code: RankField, who: str) -> None:
-    if not isinstance(code.support, np.ndarray):
-        raise TypeError(f"{who}() reads the host arrays, but this code is resident on "
-                        f"{code.support.device}. Use decode_groups() for a device-resident code.")
+    """Refuse a code whose planes are torch tensors. Anything else that indexes like numpy
+    is read: an ndarray, or the lazy zarr arrays :func:`rankfield.store.read_parts` hands
+    back, which the decoders read a plane at a time (:func:`_plane`) rather than whole.
+
+    Never imports torch - these decoders must run without it - so a tensor can only be
+    one if torch was already imported by whoever made it."""
+    torch_mod = sys.modules.get("torch")
+    for name in ("ranks", "support", "tail"):
+        a = getattr(code, name)
+        if a is None:
+            continue
+        if torch_mod is not None and isinstance(a, torch_mod.Tensor):
+            raise TypeError(f"{who}() decodes numpy (or zarr) planes, but this code's {name} is a "
+                            f"torch tensor on {a.device}. Use decode_groups(), which decodes "
+                            f"where the planes are, or pass the planes as numpy (.cpu().numpy()).")
+        if not hasattr(a, "shape") or not hasattr(a, "__getitem__"):
+            raise TypeError(f"{who}() needs the planes as arrays (numpy, or zarr arrays from "
+                            f"read_parts); this code's {name} is {type(a).__name__}")
+
+
+def _plane(a, i: int) -> np.ndarray:
+    """One plane of a stored array as numpy: a view of an ndarray, a read of a zarr array."""
+    return np.asarray(a[i])
+
+
+def _shape(code: RankField) -> tuple[int, ...]:
+    """``(Z, Y, X)``, from the planes themselves: a store written by another writer
+    (haversack's) records no ``shape``. Where the meta does record one it must agree - a
+    meta describing other planes than it came with is refused here rather than failing as a
+    mismatched boolean index somewhere below."""
+    shape = tuple(int(v) for v in code.support.shape[1:])
+    stated = code.meta.get("shape")
+    if stated is not None and tuple(int(v) for v in stated) != shape:
+        raise ValueError(f"the meta's shape {list(stated)} is not the planes' {list(shape)}")
+    return shape
 
 
 def margin(code: RankField, channel: int) -> np.ndarray:
@@ -20,33 +54,44 @@ def margin(code: RankField, channel: int) -> np.ndarray:
 
     The lead is measured against the nearest class the encoding KEPT, so it is an upper
     bound on the true lead: where a closer competitor lost the depth cut to a shell class,
-    this reads high (docs/format.md, "What the keep rule does not promise")."""
+    this reads high (docs/format.md, "What the keep rule does not promise").
+
+    Each call reads every rank and support plane once. On the lazy arrays of
+    :func:`rankfield.store.read_parts` that is a read and a decompression per call, so to
+    decode many channels read the planes once first (``np.asarray`` each into a
+    :class:`RankField`)."""
     _host(code, "margin")
     clip = code.clip
     if code.meta.get("mode") == "regions":
-        q = code.support[int(channel)].astype(np.float32)
+        _shape(code)
+        q = _plane(code.support, int(channel)).astype(np.float32)
         out = (q - ZERO_LEVEL) / (SUPPORT_MAX - ZERO_LEVEL) * clip
         out[q == 0] = -clip
         return out
     return _field(code, channel, floor=True)
 
 
-def _field(code: RankField, channel: int, *, floor: bool) -> np.ndarray:
+def _field(code: RankField, channel: int, *, floor: bool, winner: float | None = None) -> np.ndarray:
     """The channel's level at every voxel: the nearest kept competitor's gap where it wins,
     minus its own gap where it trails, ``-clip`` where it is unnamed. ``floor`` clamps every stored level to
     the clip as well - the rendering field, where the clip is the range of what is shown -
     while the restore field keeps a shell class at its true gap (format.md, "The restore").
     A winner whose runner-up is unnamed (support byte 0, the sentinel) leads by AT LEAST the
     clip: that byte is not a level and must never be read as one - ``levels[0]`` is the
-    curve's far end, 64 logits under the default log byte, not 8."""
+    curve's far end, 64 logits under the default log byte, not 8. ``winner``, when given, is
+    the level where the channel wins instead of its lead (the deficit's 0).
+
+    Every plane is read once: ``support[0]`` serves both the winner's lead and rank 1."""
     clip = code.clip
     lut = levels(code.meta)
-    shape = tuple(code.meta["shape"])
-    out = np.full(shape, -clip, np.float32)
+    out = np.full(_shape(code), -clip, np.float32)
     want = int(channel) + 1
-    sel = code.ranks[0] == want
-    if code.support.shape[0]:
-        s0 = code.support[0][sel]
+    sel = _plane(code.ranks, 0) == want
+    first = _plane(code.support, 0) if code.support.shape[0] else None
+    if winner is not None:
+        out[sel] = winner
+    elif first is not None:
+        s0 = first[sel]
         lead = lut[s0]
         if floor:
             lead = np.minimum(lead, clip)
@@ -54,8 +99,9 @@ def _field(code: RankField, channel: int, *, floor: bool) -> np.ndarray:
     else:
         out[sel] = clip
     for j in range(1, code.ranks.shape[0]):
-        sel = code.ranks[j] == want
-        level = -lut[code.support[j - 1][sel]]
+        sel = _plane(code.ranks, j) == want
+        sup = first if j == 1 else _plane(code.support, j - 1)
+        level = -lut[sup[sel]]
         out[sel] = np.maximum(level, -clip) if floor else level
     return out
 
@@ -63,13 +109,16 @@ def _field(code: RankField, channel: int, *, floor: bool) -> np.ndarray:
 def deficit(code: RankField, channel: int) -> np.ndarray:
     """``l_c - max_j l_j``: zero where c wins, negative behind (a shell class at its TRUE
     gap, an unnamed one at ``-clip``). The logits up to a per-voxel constant shared by every
-    channel - the field a restore interpolates, bit for bit what ``restore`` reads."""
+    channel - the field a restore interpolates, bit for bit what ``restore`` reads.
+
+    Each call reads every rank and support plane once. On the lazy arrays of
+    :func:`rankfield.store.read_parts` that is a read and a decompression per call, so to
+    decode many channels read the planes once first (``np.asarray`` each into a
+    :class:`RankField`)."""
     if code.meta.get("mode") == "regions":
         return margin(code, channel)
     _host(code, "deficit")
-    out = _field(code, channel, floor=False)
-    out[code.ranks[0] == int(channel) + 1] = 0.0
-    return out
+    return _field(code, channel, floor=False, winner=0.0)
 
 
 def to_device(code: RankField, device) -> RankField:
@@ -99,7 +148,7 @@ def decode_groups(code: RankField, groups, *, device=None, quantize: bool = Fals
     """
     clip = code.clip
     K = code.classes
-    shape = tuple(int(v) for v in code.meta["shape"])
+    shape = _shape(code)
     resident = isinstance(code.support, torch.Tensor)
     dev = torch.device(device) if device is not None else (code.support.device if resident else torch.device("cpu"))
     groups = [[int(c) for c in g] for g in groups]
@@ -222,10 +271,11 @@ def probabilities(code: RankField, temperature: float = 1.0) -> tuple[np.ndarray
         ids = np.broadcast_to(np.arange(code.classes, dtype=np.int64)[:, None, None, None], m.shape)
         return ids.copy(), 1.0 / (1.0 + np.exp(-m))
     lut = levels(code.meta)
-    gaps = np.concatenate([np.zeros((1, *code.support.shape[1:]), np.float32),
-                           lut[code.support]], axis=0)
+    support = np.asarray(code.support)                  # every plane at once: read it whole
+    gaps = np.concatenate([np.zeros((1, *support.shape[1:]), np.float32),
+                           lut[support]], axis=0)
     w = np.exp(-gaps / T)
-    ids = code.ranks.astype(np.int64) - 1
+    ids = np.asarray(code.ranks).astype(np.int64) - 1
     w[ids < 0] = 0.0
     z = w.sum(axis=0)
     tail = tail_at(code, T)

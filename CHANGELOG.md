@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-Found running a 0.625 mm CTPA through `lung_vessels` (K=5) on a 16 GB M2, and carried to
-the regions encoder. No bytes move: every change is to how much memory the encoders take.
+Two defects found running a 0.625 mm CTPA through `lung_vessels` (K=5) on a 16 GB M2, and the
+same slab fix carried to the regions encoder. No bytes move: every change is to how much
+memory the encoders take and what the host decoders accept.
 
 - `encode()` sized its slab for the one-byte shell mask alone (~256 MB of it), so at small K
   the slab was the whole volume - and a voxel of a slab really costs ~17 bytes a class plus
@@ -41,6 +42,16 @@ the regions encoder. No bytes move: every change is to how much memory the encod
   time. It has the same blind spot: on a GPU, the per-slab host copy is not counted. A given
   `slab` must be a positive integer, as in `encode`; 0 and negative values used to be taken
   as 1 without a word.
+- `margin()`, `deficit()` and `probabilities()` refused a field from `store.read_parts()`: its
+  planes are lazy zarr arrays, and the host check read `.device` off them (`AttributeError`).
+  They now refuse only torch-tensor planes (any of ranks, support, tail, by name) and read
+  anything else that indexes like numpy. `margin`/`deficit` read each plane once per call -
+  `support[0]` used to be read twice and `ranks[0]` again by `deficit` - which on a zarr array
+  is a decompression per read; to decode many channels, read the planes once first.
+- The field's shape comes from the planes: haversack's stores record no `shape`, which was
+  the `KeyError: 'shape'` behind the first error (`decode_groups()` had it too). A meta
+  `shape` that disagrees with the planes is refused with both shapes named, where it used to
+  fail as a mismatched boolean index.
 
 ## 0.3.4 - 2026-09-22
 
