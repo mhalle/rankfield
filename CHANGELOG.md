@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+Found running a 0.625 mm CTPA through `lung_vessels` (K=5) on a 16 GB M2, and carried to
+the regions encoder. No bytes move: every change is to how much memory the encoders take.
+
+- `encode()` sized its slab for the one-byte shell mask alone (~256 MB of it), so at small K
+  the slab was the whole volume - and a voxel of a slab really costs ~17 bytes a class plus
+  ~24-46 per kept plane (fp32 gaps, key and exp temporaries; int64 selection, sort and gather
+  indices). A 40-Mvoxel K=5 field asked for ~10 GB of MPS pool in one slab and ran out.
+  The slab is now the most z planes whose `slab_bytes(planes, rows, columns, K, depth,
+  temperatures)` fits `memory_budget` bytes. That bound was fitted by counting the tensors the
+  encoder's ops return, alive at once, and checked over 1,104 configurations (planes down to
+  1x1, slabs of 1-3, both keep rules, fp16 and fp32): the peak is 0.05-0.86 of it, 0.20-0.86 on
+  planes of 16x16 and up. The count cannot see scratch a kernel allocates inside itself, nor
+  on a GPU the per-slab copies to the host, so the budget is working memory as the ops define
+  it, not a promise about a device pool.
+- `memory_budget` defaults to 1 GiB: a small footprint, not a measurement of any machine. A
+  caller that knows its device's budget should pass it. At the default, large-K fields take
+  thinner slabs than before (whole-body K=118 at 236x167x167: 81 planes -> 15), which is more
+  per-slab launches and ~13 % more halo work; the throughput cost has not been measured.
+- The K-sized planes are freed as soon as the selection has read them, so the (N, slab) phase
+  no longer sits on top of them: 315 -> 242 B/voxel at K=5, 460 -> 404 at K=12; at K=118
+  (2,174 -> 2,158) the peak is the K phase itself.
+- `slab=` must be a positive integer. 0 used to fail inside `range()`, and a negative slab ran
+  no slab at all and returned the uninitialized planes as a field; both now raise
+  `ValueError`. A given `slab` is taken as is, without consulting `memory_budget`.
+- New: `choose_slab`, `slab_bytes`, `DEFAULT_MEMORY_BUDGET`.
+- `encode_regions()` had a fixed `slab=32`, whatever K and the plane, and held 13 bytes per
+  voxel and region at its peak: the fp32 margin plus a new temporary for each step of the
+  quantization (division, clamp, scale, offset, round, clamp) and the uint8 plane. At 118
+  regions on 512 x 512 that is ~13 GB in one slab. The margin is now rewritten in place, so
+  the peak is exactly 5 bytes (the fp32 plane and the uint8 plane). The bytes do not change:
+  it is the same operations in the same order, checked against the out-of-place form on the
+  CPU and MPS. It takes `memory_budget` (the same 1 GiB default) and sizes its slab with
+  `choose_region_slab(shape, classes, memory_budget)`, the most planes whose
+  `region_slab_bytes(planes, rows, columns, classes)` fits. That bound is 5 bytes per voxel
+  and region and has no fixed term. It was counted as `encode`'s was, over K 1-118, planes
+  1x1 to 64x64, slabs of 1 and 3, and fp32, fp16 and bf16 input, and the count equals it every
+  time. It has the same blind spot: on a GPU, the per-slab host copy is not counted. A given
+  `slab` must be a positive integer, as in `encode`; 0 and negative values used to be taken
+  as 1 without a word.
+
 ## 0.3.4 - 2026-09-22
 
 - The house spelling is American, and a test holds it there: `tests/test_american_spelling.py`

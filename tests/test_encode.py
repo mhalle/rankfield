@@ -2,6 +2,7 @@
 import numpy as np
 import pytest
 import torch
+import torch.utils._python_dispatch
 
 import rankfield as rf
 from conftest import logits
@@ -63,6 +64,99 @@ class TestPlanes:
             rf.encode(torch.zeros(4, 5, 6))
         with pytest.raises(TypeError):
             rf.encode(torch.zeros(2, 3, 4, 5, dtype=torch.int32))
+
+
+class LiveBytes(torch.utils._python_dispatch.TorchDispatchMode):
+    """The peak bytes of the storages that ops inside the mode return, alive at once - counted
+    per storage as ops return and as their last tensor dies, so it does not depend on the
+    allocator, the machine or what else is running (process RSS does). It cannot see scratch
+    a kernel allocates inside itself; exact for what the ops hand back, no more."""
+
+    def __init__(self, *outside):
+        super().__init__()
+        self.outside = {t.untyped_storage().data_ptr() for t in outside}
+        self.refs, self.size, self.live, self.peak = {}, {}, 0, 0
+
+    def _drop(self, ptr):
+        self.refs[ptr] -= 1
+        if not self.refs[ptr]:
+            del self.refs[ptr]
+            self.live -= self.size.pop(ptr)
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        import weakref
+        from torch.utils._pytree import tree_leaves
+        out = func(*args, **(kwargs or {}))
+        for t in tree_leaves(out):
+            if not isinstance(t, torch.Tensor):
+                continue
+            st = t.untyped_storage()
+            ptr = st.data_ptr()
+            if ptr in self.outside or st.nbytes() == 0:
+                continue
+            if ptr not in self.refs:
+                self.refs[ptr], self.size[ptr] = 0, st.nbytes()
+                self.live += st.nbytes()
+                self.peak = max(self.peak, self.live)
+            self.refs[ptr] += 1
+            weakref.finalize(t, self._drop, ptr)
+        return out
+
+
+class TestSlab:
+    def test_a_few_classes_on_a_wide_plane_get_a_thin_slab(self):
+        """The 2026-09-23 failure: a 0.625 mm CTPA, K=5 (lung_vessels). The old rule budgeted
+        the one-byte shell mask alone and took the whole volume as one slab (~10 GB of MPS
+        pool at 40 Mvoxel); the slab must be sized by what a voxel really costs."""
+        Z, Y, X = 152, 512, 512                                    # ~40 Mvoxel
+        slab = rf.choose_slab((Z, Y, X), classes=5, depth=5, temperatures=1)
+        assert slab <= 16                                          # well under Z
+        assert rf.slab_bytes(slab, Y, X, 5, 5, 1) <= rf.DEFAULT_MEMORY_BUDGET
+        assert rf.slab_bytes(slab + 1, Y, X, 5, 5, 1) > rf.DEFAULT_MEMORY_BUDGET   # the most that fits
+        assert (1 << 28) // (5 * Y * X) >= Z                       # the old rule: all of it
+        # a plane over the budget still encodes, one plane at a time
+        assert rf.choose_slab((Z, Y, X), 118, 6, memory_budget=1) == 1
+        assert rf.choose_slab((3, 8, 8), 5, 5) == 3                # never past the volume
+
+    @pytest.mark.parametrize("K,depth,temps,keep", [
+        (5, 6, (1.0,), "shell"), (2, 6, (1.0,), "shell"), (12, 4, (1.0, 2.0, 4.0), "shell"),
+        (40, 6, (1.0,), "shell"), (12, 12, (1.0,), "shell"), (12, 6, (1.0,), "clip")])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+    def test_the_counted_peak_stays_within_the_bound(self, K, depth, temps, keep, dtype):
+        """What the encoder's ops allocate, counted while alive: the peak is under slab_bytes
+        for the slab, whatever the depth, tails, keep rule or dtype - and on a tiny plane,
+        where the shell's padded winner maps outweigh the voxels (a 2x2 plane once ran 4 %
+        over a bound that was per voxel only)."""
+        N = min(depth, K)
+        for Y in (2, 24):
+            lg = logits(K=K, shape=(6, Y, Y), seed=K, noise=0.3).to(dtype)
+            for slab in (1, 3):
+                with LiveBytes(lg) as m:
+                    rf.encode(lg, depth=depth, slab=slab, keep=keep, tail_temperatures=temps)
+                bound = rf.slab_bytes(slab, Y, Y, K, N, 0 if N >= K else len(temps))
+                assert 0 < m.peak <= bound, (Y, slab, m.peak, bound)
+
+    def test_the_budget_is_kept_and_the_bytes_do_not_move(self):
+        Z, Y, X = 12, 32, 32
+        lg = logits(K=5, shape=(Z, Y, X), seed=3, noise=0.3)
+        budget = rf.slab_bytes(3, Y, X, 5, 5, 0)                    # three planes' worth
+        with LiveBytes(lg) as m:
+            a = rf.encode(lg, memory_budget=budget)
+        assert m.peak <= budget
+        with LiveBytes(lg) as whole:
+            b = rf.encode(lg, slab=Z)
+        assert whole.peak > budget                                  # the test can fail
+        np.testing.assert_array_equal(a.ranks, b.ranks)
+        np.testing.assert_array_equal(a.support, b.support)
+        assert a.meta == b.meta
+        with pytest.raises(ValueError):
+            rf.encode(lg, memory_budget=0)
+
+    @pytest.mark.parametrize("slab", [0, -2, 1.5])
+    def test_a_slab_that_is_not_a_positive_count_is_refused(self, slab):
+        """0 used to die inside range(); -2 ran no slab and returned np.empty's garbage."""
+        with pytest.raises(ValueError, match="slab"):
+            rf.encode(logits(K=3, shape=(4, 5, 6)), slab=slab)
 
 
 class TestShell:
@@ -267,3 +361,56 @@ class TestRegions:
         at = rf.encode_regions(torch.full((2, 3, 3, 3), 1.5), threshold=1.5)
         assert float(rf.margin(at, 0).max()) == 0.0
         assert code.ranks is None and code.tail is None and code.meta["mode"] == "regions"
+
+    def test_a_wide_plane_with_many_regions_gets_a_thin_slab(self):
+        """The fixed slab=32 held K x 32 x Y x X voxels at once, at 13 bytes each as it was
+        written: 118 regions on 512 x 512 was ~13 GB in one slab. The slab is sized now."""
+        Z, Y, X = 152, 512, 512
+        slab = rf.choose_region_slab((Z, Y, X), 118)
+        assert slab < 32
+        assert rf.region_slab_bytes(slab, Y, X, 118) <= rf.DEFAULT_MEMORY_BUDGET
+        assert rf.region_slab_bytes(slab + 1, Y, X, 118) > rf.DEFAULT_MEMORY_BUDGET
+        assert rf.choose_region_slab((Z, Y, X), 118, memory_budget=1) == 1
+        assert rf.choose_region_slab((3, 8, 8), 2) == 3
+
+    @pytest.mark.parametrize("K", [1, 3, 40])
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_the_counted_peak_stays_within_the_bound(self, K, dtype):
+        """The margin plane is rewritten in place and converted once: the count is exactly the
+        bound, 5 bytes a voxel and class, on any plane and at any slab."""
+        for Y, X in ((1, 1), (7, 5), (24, 24)):
+            lg = (torch.randn(K, 6, Y, X, generator=torch.Generator().manual_seed(K)) * 20).to(dtype)
+            for slab in (1, 3):
+                with LiveBytes(lg) as m:
+                    rf.encode_regions(lg, slab=slab)
+                assert 0 < m.peak <= rf.region_slab_bytes(slab, Y, X, K), (Y, X, slab, m.peak)
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+    def test_the_budget_is_kept_and_the_bytes_do_not_move(self, dtype):
+        Z, Y, X, K = 12, 32, 32, 6
+        lg = (logits(K=K, shape=(Z, Y, X), seed=5, noise=0.3) * 3).to(dtype)
+        before = lg.clone()
+        budget = rf.region_slab_bytes(3, Y, X, K)                   # three planes' worth
+        with LiveBytes(lg) as m:
+            a = rf.encode_regions(lg, threshold=0.4, memory_budget=budget)
+        assert m.peak <= budget
+        with LiveBytes(lg) as whole:
+            b = rf.encode_regions(lg, threshold=0.4, slab=Z)
+        assert whole.peak > budget                                  # the test can fail
+        c = rf.encode_regions(lg, threshold=0.4, slab=5)            # a slab that leaves a remainder
+        for other in (b, c):
+            np.testing.assert_array_equal(a.support, other.support)
+            assert a.meta == other.meta
+        # and the bytes are the quantization as written out of place, before the in-place rewrite
+        q = (((lg.float() - 0.4) / rf.CLIP).clamp(-1, 1) * (rf.SUPPORT_MAX - rf.ZERO_LEVEL)
+             + rf.ZERO_LEVEL).round().clamp(1, rf.SUPPORT_MAX).to(torch.uint8).numpy()
+        np.testing.assert_array_equal(a.support, q)
+        assert torch.equal(lg, before)                              # the caller's logits untouched
+        with pytest.raises(ValueError):
+            rf.encode_regions(lg, memory_budget=0)
+
+    @pytest.mark.parametrize("slab", [0, -2, 1.5])
+    def test_a_slab_that_is_not_a_positive_count_is_refused(self, slab):
+        """0 and -2 used to be quietly taken as 1."""
+        with pytest.raises(ValueError, match="slab"):
+            rf.encode_regions(logits(K=3, shape=(4, 5, 6)), slab=slab)

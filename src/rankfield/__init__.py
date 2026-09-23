@@ -10,7 +10,8 @@ decoders ``margin``/``deficit``/``decode_groups``/``probabilities``, the restore
 from .code import (CLIP, DEFAULT_DEPTH, FORMAT_VERSION, GAP_UNIT, SUPPORT_MAX, TAIL_MAX,
                    ZERO_LEVEL, Part, RankField, byte_of_gap, levels)
 from .decode import decode_groups, deficit, margin, probabilities, tail_at, to_device
-from .encode import encode, encode_regions, settle_ties
+from .encode import (DEFAULT_MEMORY_BUDGET, choose_region_slab, choose_slab, encode, encode_regions,
+                     region_slab_bytes, settle_ties, slab_bytes)
 from .frame import Frame
 from .geometry import Geometry
 from .grid import Grid
@@ -19,9 +20,9 @@ from .reference import reference_restore
 from . import store  # noqa: F401 - zarr at call time only
 from .restore import Restored, array_grid, mapping_of, resolve_grid, restore, roi_of
 
-__all__ = ["CLIP", "DEFAULT_DEPTH", "FORMAT_VERSION", "GAP_UNIT", "SUPPORT_MAX", "TAIL_MAX",
+__all__ = ["CLIP", "DEFAULT_DEPTH", "DEFAULT_MEMORY_BUDGET", "FORMAT_VERSION", "GAP_UNIT", "SUPPORT_MAX", "TAIL_MAX",
            "ZERO_LEVEL", "Frame", "Geometry", "Grid", "Mapping", "Part", "RankField", "Restored",
-           "array_grid", "byte_of_gap", "decode_groups", "deficit", "encode", "encode_regions", "levels",
-           "mapping_of", "margin", "probabilities", "reference_restore", "resolve_grid", "restore", "roi_of",
-           "settle_ties", "tail_at", "to_device"]
+           "array_grid", "byte_of_gap", "choose_region_slab", "choose_slab", "decode_groups", "deficit", "encode", "encode_regions", "levels",
+           "mapping_of", "margin", "probabilities", "reference_restore", "region_slab_bytes", "resolve_grid", "restore", "roi_of",
+           "settle_ties", "slab_bytes", "tail_at", "to_device"]
 __version__ = "0.3.4"
