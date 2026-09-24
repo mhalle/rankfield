@@ -70,22 +70,28 @@ def settle_ties(top: torch.Tensor, idx: torch.Tensor, N: int) -> None:
             idx[j], idx[j + 1] = lo, hi
 
 
-def _shell(win_ext: torch.Tensor, K: int, halo_lo: int, zs: int) -> torch.Tensor:
-    """``(K, zs, Y, X)`` bool: class c wins at the voxel or at one of its 26 neighbors.
+def _winners_around(win_ext: torch.Tensor, halo_lo: int, zs: int) -> torch.Tensor:
+    """``(zs + 2, Y + 2, X + 2)`` int64: the slab's winner map with one voxel of neighbors
+    on every side, so voxel ``(z, y, x)`` of the slab sees its 27 at ``[z:z+3, y:y+3, x:x+3]``.
 
     ``win_ext`` is the winner map of the slab with one plane of halo on each side where the
-    volume has one (``halo_lo`` says whether the first plane is halo). Edges replicate."""
-    Ze, Y, X = win_ext.shape
+    volume has one (``halo_lo`` says whether the first plane is halo). Edges replicate. The
+    one statement of a voxel's neighborhood: the torch shell and the Metal kernel both read it."""
     pad = torch.nn.functional.pad(win_ext[None, None].to(torch.float32), (1, 1, 1, 1, 0, 0),
                                   mode="replicate")[0, 0].to(torch.int64)      # y/x replicate
     zpad = torch.cat([pad[:1], pad, pad[-1:]], 0)                             # z replicate
-    z0 = 1 + halo_lo                                                          # slab start in zpad
+    return zpad[halo_lo:halo_lo + zs + 2]
+
+
+def _shell(win_ext: torch.Tensor, K: int, halo_lo: int, zs: int) -> torch.Tensor:
+    """``(K, zs, Y, X)`` bool: class c wins at the voxel or at one of its 26 neighbors."""
+    around = _winners_around(win_ext, halo_lo, zs)
+    Y, X = around.shape[1] - 2, around.shape[2] - 2
     shell = torch.zeros((K, zs, Y, X), dtype=torch.bool, device=win_ext.device)
-    for dz in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                w = zpad[z0 + dz:z0 + dz + zs, 1 + dy:1 + dy + Y, 1 + dx:1 + dx + X]
-                shell.scatter_(0, w[None], True)
+    for dz in (0, 1, 2):
+        for dy in (0, 1, 2):
+            for dx in (0, 1, 2):
+                shell.scatter_(0, around[dz:dz + zs, dy:dy + Y, dx:dx + X][None], True)
     return shell
 
 
@@ -268,57 +274,38 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
     # dropped. Here the step is ~8e-6 logits whatever the data, and the winner is pinned
     # below every key by -inf, so no step can reach it.
     big = float(gap_range) + 1.0
+    fused = _fused_select(lg_all, keep, N)
     for z0 in range(0, Z, slab):
         z1 = min(z0 + slab, Z)
         lg = lg_all[:, z0:z1].float()
         top0, win = lg.max(0, keepdim=True)     # the winner's index comes free with its value
         gaps = top0 - lg                                        # (K, zs, Y, X) >= 0
         del lg, top0            # (K, slab) planes are the peak: each goes as soon as it is read
-        if keep == "shell":
-            lo, hi = max(0, z0 - 1), min(Z, z1 + 1)
-            win_ext = lg_all[:, lo:hi].float().argmax(0)
-            sh = _shell(win_ext, K, z0 - lo, z1 - z0)
-            # Two (K, slab) planes live at the peak, which is what `torch.where(sh, gaps -
-            # big, gaps)` cost before. `key[sh] -= big` would read better and cost far more:
-            # a boolean mask materializes int64 indices, three bytes of temporary per byte
-            # of key.
-            key = gaps.clamp(max=float(gap_range))
-            key.add_(sh * -big)                             # shell first, by clamped gap
-            key.scatter_(0, win, float("-inf"))             # the winner, exactly, at any scale
-            del win_ext
-        else:
-            sh = None
-            key = gaps          # no offset, so the winner's gap of 0 is always among the N
-        # Before the cut: _select fills the unchosen with inf IN PLACE, and with keep="clip"
-        # the key is `gaps` itself (the shell branch copies it, that branch has nothing to
-        # copy), so a partition function read afterwards would score every dropped class as
-        # zero mass and report a tail of nothing.
         z_full = _ordered_sum(torch.exp(-gaps)) if tail is not None else None
         z_temps = {t: _ordered_sum(torch.exp(-gaps / t)) for t in tails}
-        idx = _select(key, N)                                     # the N smallest keys, by index on ties
-        ktop = torch.gather(key, 0, idx)                          # (key's unchosen entries are now inf)
-        del key
-        settle_ties(ktop, idx, N)
-        del ktop
-        g_sel = torch.gather(gaps, 0, idx)                        # true gaps of the kept
-        sh_sel = torch.gather(sh, 0, idx) if sh is not None else torch.zeros_like(g_sel, dtype=torch.bool)
-        del gaps, sh, win       # from here on the slab is (N, slab): nothing K-sized is left
-        # With a plane per class there is nothing to gain by dropping one: the clip would
-        # leave a class the field has room for at the -clip floor and cost a tail to
-        # describe. `exhaustive` says nothing was dropped, so nothing is.
-        kept = (torch.ones_like(g_sel, dtype=torch.bool) if exhaustive
-                else sh_sel | (g_sel < clip))
-        kept[0] = True                                            # the winner, always
-        # order the kept by true gap so ranks[1] is the runner-up; the dropped go last
-        # inf, not the offset: a KEPT shell class can trail by more than the range, and a
-        # dropped entry has to sort behind it for the sentinels to stay a suffix
-        order_key = torch.where(kept, g_sel, torch.full_like(g_sel, float("inf")))
-        order_key, perm = torch.sort(order_key, dim=0, stable=True)
-        idx = torch.gather(idx, 0, perm)
-        g_sel = torch.gather(g_sel, 0, perm)
-        sh_sel = torch.gather(sh_sel, 0, perm)
-        kept = torch.gather(kept, 0, perm)
-        settle_ties(order_key, idx, N)
+        if fused is not None:
+            # The same selection and order as the torch path below, one thread a voxel
+            # (backends/metal_encode.py): on MPS, topk and sort over millions of rows of a few
+            # classes were 9 of 13.5 s of a K=5 field's encode (2026-09-23).
+            lo, hi = max(0, z0 - 1), min(Z, z1 + 1)
+            around = _winners_around(lg_all[:, lo:hi].float().argmax(0), z0 - lo, z1 - z0)
+            idx, g_sel, kept = fused.select(gaps, around, win[0], N=N, exhaustive=exhaustive,
+                                            gap_range=float(gap_range), big=big, clip=float(clip))
+            del gaps, around, win
+        elif exhaustive and EXHAUSTIVE_SHORTCUT:
+            # Every class is kept, so the selection keeps all of them, and the torch path's
+            # order comes down to (true gap, class index): its stable sort by gap, then
+            # settle_ties by index among equal gaps. One stable sort along the class axis is
+            # exactly that - no shell, key, topk or tie walk needed. A K=5 field at depth 6
+            # is exhaustive, which is how lung_vessels' fine stage spent 6.3 s on MPS
+            # selecting all five of five (2026-09-23).
+            g_sel, idx = torch.sort(gaps, dim=0, stable=True)
+            kept = torch.ones_like(g_sel, dtype=torch.bool)
+            del gaps, win
+        else:
+            idx, g_sel, kept = _select_and_order(lg_all, gaps, win, z0, z1, Z, K, N, keep,
+                                                 exhaustive, gap_range, big, clip)
+            del gaps, win
         r = (idx + 1).to(torch.int32)
         if N > 1:
             sup = byte_of_gap(g_sel[1:], meta).round()
@@ -350,7 +337,7 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
             t = ((z_t - _ordered_sum(kept_t)) / z_t).clamp(0, 1)
             max_tails[temp] = max(max_tails[temp], float(t.max()))
             arr[z0:z1] = (t * TAIL_MAX).round().cpu().numpy().astype(np.uint16)
-        del idx, g_sel, sh_sel, kept, z_full, z_temps
+        del idx, g_sel, kept, z_full, z_temps
     # what was dropped: 0 when nothing could be, the measured maximum when the tail was
     # written, and unknown - not zero - when it was not
     meta["max_tail"] = 0.0 if exhaustive else (max_tail if tail is not None else None)
@@ -360,6 +347,74 @@ def encode(logits: torch.Tensor, *, depth: int = DEFAULT_DEPTH, clip: float = CL
     meta["max_tail_at_temperature"] = [(0.0 if exhaustive else (max_tail if t == 1.0 else max_tails[t]))
                                        for t in stored]
     return RankField(ranks=ranks, support=support, tail=tail, meta=meta, tails=tails or None)
+
+
+#: Off, every field takes the general torch path below; tests compare the fast paths to it.
+EXHAUSTIVE_SHORTCUT = True
+#: Off, MPS takes the torch path; tests compare the Metal kernel to it.
+METAL_ENCODE = True
+
+
+def _fused_select(lg_all, keep: str, N: int):
+    """The Metal select kernel when it applies to this encode, else None: logits on MPS, the
+    shell rule (0.2's clip rule stays on torch), and a depth the kernel's registers hold."""
+    if not METAL_ENCODE or keep != "shell" or lg_all.device.type != "mps":
+        return None
+    from .backends import metal_encode
+    if N > metal_encode.NMAX or not metal_encode.available():
+        return None
+    return metal_encode
+
+
+def _select_and_order(lg_all, gaps, win, z0, z1, Z, K, N, keep, exhaustive, gap_range, big,
+                      clip):
+    """The general torch path: which N classes a voxel keeps, and in what order.
+
+    Returns ``(idx, g_sel, kept)``, each ``(N, zs, Y, X)``: class indices in stored order, their
+    true gaps, and whether each is kept. The fast paths above are held to this, byte for byte.
+    """
+    if keep == "shell":
+        lo, hi = max(0, z0 - 1), min(Z, z1 + 1)
+        win_ext = lg_all[:, lo:hi].float().argmax(0)
+        sh = _shell(win_ext, K, z0 - lo, z1 - z0)
+        # Two (K, slab) planes live at the peak, which is what `torch.where(sh, gaps -
+        # big, gaps)` cost before. `key[sh] -= big` would read better and cost far more:
+        # a boolean mask materializes int64 indices, three bytes of temporary per byte
+        # of key.
+        key = gaps.clamp(max=float(gap_range))
+        key.add_(sh * -big)                             # shell first, by clamped gap
+        key.scatter_(0, win, float("-inf"))             # the winner, exactly, at any scale
+        del win_ext
+    else:
+        sh = None
+        key = gaps          # no offset, so the winner's gap of 0 is always among the N
+    # (the partition functions are taken by the caller BEFORE this: _select fills the
+    # unchosen with inf IN PLACE, and with keep="clip" the key is `gaps` itself)
+    idx = _select(key, N)                                     # the N smallest keys, by index on ties
+    ktop = torch.gather(key, 0, idx)                          # (key's unchosen entries are now inf)
+    del key
+    settle_ties(ktop, idx, N)
+    del ktop
+    g_sel = torch.gather(gaps, 0, idx)                        # true gaps of the kept
+    sh_sel = torch.gather(sh, 0, idx) if sh is not None else torch.zeros_like(g_sel, dtype=torch.bool)
+    del sh                  # from here on the slab is (N, slab): nothing K-sized is left
+    # With a plane per class there is nothing to gain by dropping one: the clip would
+    # leave a class the field has room for at the -clip floor and cost a tail to
+    # describe. `exhaustive` says nothing was dropped, so nothing is.
+    kept = (torch.ones_like(g_sel, dtype=torch.bool) if exhaustive
+            else sh_sel | (g_sel < clip))
+    kept[0] = True                                            # the winner, always
+    # order the kept by true gap so ranks[1] is the runner-up; the dropped go last
+    # inf, not the offset: a KEPT shell class can trail by more than the range, and a
+    # dropped entry has to sort behind it for the sentinels to stay a suffix
+    order_key = torch.where(kept, g_sel, torch.full_like(g_sel, float("inf")))
+    order_key, perm = torch.sort(order_key, dim=0, stable=True)
+    idx = torch.gather(idx, 0, perm)
+    g_sel = torch.gather(g_sel, 0, perm)
+    sh_sel = torch.gather(sh_sel, 0, perm)
+    kept = torch.gather(kept, 0, perm)
+    settle_ties(order_key, idx, N)
+    return idx, g_sel, kept
 
 
 def encode_regions(logits: torch.Tensor, *, clip: float = CLIP, threshold: float = 0.0,

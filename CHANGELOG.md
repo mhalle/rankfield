@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+The encoder's selection moves off `topk` and `sort` where they were slow. No bytes move: both
+new paths are held to the torch path byte for byte, and it stays as the reference.
+
+- **On MPS, a Metal kernel selects and orders the kept classes, a thread per voxel**
+  (`backends/metal_encode.py`, the shell rule, depth up to 16). Profiling a K=5 field
+  (29 Mvoxels, `lung_vessels` on a 0.625 mm CTPA) on an M2 put 9 of its 13.5 s in three
+  calls: `topk` twice in `_select` and the stable `sort`, each over millions of rows of five
+  classes - 0.49, 0.46 and 0.38 s on the same machine's CPU, and no faster with the class
+  axis last. The kernel makes the torch path's decisions from the same numbers: the key
+  `min(gap, gap_range)` less `big` in the shell (one IEEE add), the winner first, the N
+  smallest keys with the lowest index taking a tie at the cut, kept = winner, shell or under
+  the clip, and the kept ordered by (true gap, class index). `exp`, the gap byte and the
+  tail stay on torch. K=5: 13.2 s -> 0.74 s (x17.7); K=118 on 0.8 Mvoxels: 0.65 -> 0.15 s.
+  Through haversack the fine stage's stored arrays were identical to 0.3.5's.
+- **When depth reaches K every class is kept, and one stable sort of the gaps is the whole
+  selection**: the torch path's order then comes down to (true gap, class index). It skips
+  the shell, the key, `_select`, both `settle_ties` and the second sort, on every device:
+  K=5 above on the CPU 8.2 -> 1.09 s, on an A10 1.12 -> 0.49 s.
+- `EXHAUSTIVE_SHORTCUT` and `METAL_ENCODE` turn the two paths off; `tests/test_fast_paths.py`
+  compares each with the torch path (after showing it ran) over tie-heavy fields - small
+  integer logits, gaps exactly at the clip, shell gaps past the range - every depth to K,
+  both keep rules, extra tail temperatures and one-plane slabs. 12 mutants: 9 killed; the
+  three survivors are equivalent (the center voxel's winner, the order of dropped entries)
+  or unobservable here (an unstable sort that happens to be stable on these rows).
+- A slab now costs the kernel path a fixed overhead that the torch path's selection hid:
+  one plane a slab took 2.09 s against 0.75 s at the 1 GiB default. A caller passing a
+  tiny `memory_budget` pays that.
+- Found, not changed: support can differ by one step between CUDA and the CPU (3 of 116 M
+  bytes on the field above, identically in 0.3.5), because `byte_of_gap` evaluates the log
+  curve with each device's `log` - 4 of a million random gaps round differently. Ranks
+  match; MPS matched the CPU.
+
 ## 0.3.5 - 2026-09-23
 
 Two defects found running a 0.625 mm CTPA through `lung_vessels` (K=5) on a 16 GB M2, and the
