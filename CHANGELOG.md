@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 - 2026-09-23
 
 The encoder's selection moves off `topk` and `sort` where they were slow. No bytes move: both
 new paths are held to the torch path byte for byte, and it stays as the reference.
