@@ -105,6 +105,12 @@ class Mapping:
         return f"Mapping(a=({a}), b=({b}))"
 
 
+#: Off-diagonal terms of an :class:`Affine` below this fraction of its largest diagonal term
+#: are float noise, not rotation (``Affine.separable``): far below any real obliquity (a
+#: 0.001 degree tilt is 1.7e-5) and far above composition noise (~1e-16).
+SEPARABLE_TOLERANCE = 1e-9
+
+
 @dataclass(frozen=True)
 class Affine:
     """``x_to = x_from @ m + b``: a general affine map between index spaces (array order,
@@ -140,10 +146,17 @@ class Affine:
     def separable(self) -> Mapping | None:
         """The same map as a per-axis :class:`Mapping` - no rotation, no shear, no flip -
         or None. A restore takes the per-axis path (and the fused kernels) whenever this
-        exists, so two grids that happen to line up restore exactly as they always did."""
+        exists, so two grids that happen to line up restore exactly as they always did.
+
+        "No rotation" to within float noise: ``between`` composes one geometry with the
+        other's inverse, and two oblique grids of one orientation leave off-diagonal terms
+        of ~1e-17 - which sent such a restore down the general path, ~40x slower on MPS
+        (review, 2026-09-26). Terms below ``SEPARABLE_TOLERANCE`` of the largest diagonal
+        are taken for the zeros they are."""
         m = np.asarray(self.m)
         d = np.diag(m)
-        if np.any(m - np.diag(d)) or np.any(d < 0):
+        scale = float(np.abs(d).max()) or 1.0
+        if np.any(np.abs(m - np.diag(d)) > SEPARABLE_TOLERANCE * scale) or np.any(d < 0):
             return None
         return Mapping(tuple(d), self.b)
 

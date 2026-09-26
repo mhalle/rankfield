@@ -151,3 +151,71 @@ def test_a_pure_flip_takes_the_general_path_and_restores_exactly(interp):
     assert Affine.between(world, flipped.field.geometry).separable is None
     np.testing.assert_array_equal(rf.restore([flipped], grid=world, interp=interp).labels,
                                   rf.restore([plain], grid=world, interp=interp).labels)
+
+
+def test_float_noise_is_not_a_rotation():
+    """Two oblique grids of one orientation compose to off-diagonal terms of ~1e-17; they took
+    the general path (~40x slower on MPS) until the tolerance (review, 2026-09-26)."""
+    from rankfield.mapping import SEPARABLE_TOLERANCE
+    th = np.deg2rad(13.7)
+    geo = rf.Geometry(shape=(20, 24, 24), directions=((0.0, 0.0, 1.3),
+                      (0.0, np.cos(th), -np.sin(th)), (1.0, 0.0, 0.0)), origin=(3.0, -7.0, 11.0))
+    fine = geo.regrid((40, 48, 48), (0.65, 0.5, 0.5))
+    aff = Affine.between(fine, geo)
+    noise = np.abs(np.asarray(aff.m) - np.diag(np.diag(aff.m))).max()
+    assert 0 <= noise < SEPARABLE_TOLERANCE
+    assert aff.separable is not None
+    assert Affine(np.array([[1.0, 1e-3, 0], [0, 1, 0], [0, 0, 1]])).separable is None
+
+
+def test_nearest_under_a_flip_differs_only_at_exact_ties():
+    """The documented limit: world samples exactly between two model samples round up in array
+    order, which a reversed axis turns into the other sample. Linear is exact there."""
+    lg = logits(K=7, shape=(8, 10, 12), noise=0.3)
+    plain = part(rf.encode(lg, depth=6), rf.Geometry.aligned((8, 10, 12), 2.0, origin=(4.0, -6.0, 8.0)))
+    flipped = part(rf.encode(torch.flip(lg, dims=(3,)).contiguous(), depth=6),
+                   rf.Geometry(shape=(8, 10, 12), directions=((0.0, 0.0, 2.0), (0.0, 2.0, 0.0), (-2.0, 0.0, 0.0)),
+                               origin=(4.0 + 2.0 * 11, -6.0, 8.0)))
+    tie = rf.Geometry.aligned((17, 21, 25), 1.0, origin=(5.0, -6.0, 9.0))     # x lands on .5
+    lin = [rf.restore([p], grid=tie).labels for p in (plain, flipped)]
+    np.testing.assert_array_equal(*lin)
+    near = [rf.restore([p], grid=tie, interp="nearest").labels for p in (plain, flipped)]
+    assert (near[0] != near[1]).any()                  # the limit exists and is documented
+    off = rf.Geometry.aligned((17, 21, 25), 1.0, origin=(5.25, -6.0, 9.0))  # no ties
+    np.testing.assert_array_equal(*[rf.restore([p], grid=off, interp="nearest").labels
+                                    for p in (plain, flipped)])
+
+
+def test_an_roi_on_a_world_grid_of_any_spacing_is_placed():
+    """The roi's world origin is its start in MILLIMETERS along the grid's axes; every earlier
+    roi test used 1 mm, where indices and millimeters agree (review, 2026-09-26)."""
+    plain, other = _flipped_and_swapped()
+    world = rf.Geometry.aligned((22, 27, 31), 0.8, origin=(4.5, -6.0, 7.5))
+    whole = rf.restore([other], grid=world)
+    roi = ((3, 11), (5, 19), (2, 9))
+    got = rf.restore([other], grid=world, roi=roi)
+    np.testing.assert_array_equal(got.labels, whole.labels[3:11, 5:19, 2:9])
+    np.testing.assert_allclose(got.geometry.world((0, 0, 0)), whole.geometry.world((3, 5, 2)))
+
+
+def test_several_parts_paint_through_a_world_grid_as_through_their_own():
+    """Two parts, the later one's class 0 transparent, stored rotated vs plain: the general path
+    paints as the per-axis path does."""
+    def pair(transform, geo):
+        a, b = logits(K=5, shape=(8, 10, 12), noise=0.3, seed=1), logits(K=4, shape=(8, 10, 12), noise=0.3, seed=2)
+        b[0] += 3.0                                    # the second part is mostly background
+        ps = []
+        for i, lg in enumerate((a, b)):
+            code = rf.encode(transform(lg), depth=4)
+            code.labels = [0] + [10 * (i + 1) + k for k in range(1, code.classes)]
+            code.geometry = geo
+            ps.append(rf.Part(field=code, name=f"p{i}"))
+        return ps
+    plain = pair(lambda t: t, rf.Geometry.aligned((8, 10, 12), 2.0, origin=(4.0, -6.0, 8.0)))
+    rotated = pair(lambda t: torch.flip(t, dims=(3,)).transpose(2, 3).contiguous(),
+                   rf.Geometry(shape=(8, 12, 10), directions=((0.0, 0.0, 2.0), (-2.0, 0.0, 0.0), (0.0, 2.0, 0.0)),
+                               origin=(4.0 + 2.0 * 11, -6.0, 8.0)))
+    world = rf.Geometry.aligned((17, 21, 25), 1.0, origin=(4.5, -6.0, 7.5))
+    a, b = (rf.restore(ps, grid=world).labels for ps in (plain, rotated))
+    np.testing.assert_array_equal(a, b)
+    assert len(set(np.unique(a)) & {21, 22, 23}) and len(set(np.unique(a)) & {11, 12, 13, 14})

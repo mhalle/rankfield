@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **A world restore between grids that line up takes the fast path again.** Two oblique grids of
+  one orientation compose to off-diagonal terms of ~1e-17, which `Affine.separable` read as a
+  rotation: the per-axis path and its kernels were skipped (~40x slower on MPS). Terms below
+  `SEPARABLE_TOLERANCE` (1e-9 of the diagonal) are float noise now.
+- **Documented: nearest under a flip differs at exact half-sample ties** (the per-axis rule rounds
+  up in array order); linear is exact. Tests now cover an roi on a world grid at a spacing other
+  than 1 mm and several parts painting through the general path (review, 2026-09-26).
+
 ## 0.3.7 - 2026-09-25
 
 - **Restore onto a world geometry.** `restore(parts, grid=<Geometry>)` puts an unframed part's

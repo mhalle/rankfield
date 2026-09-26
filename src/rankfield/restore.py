@@ -33,6 +33,12 @@ decision - the inside test, the edge clamp, corners, weights, the deficit - made
 per-axis path makes it. A framed part refuses a world grid: its frame is the exact rule its
 model grid was made by, and a world resample would only approximate it.
 
+*Nearest at a tie.* The per-axis rule rounds a coordinate exactly half-way between two samples
+UP (``floor(c + 0.5)``). Under a reversed axis the higher index is the other sample in the
+world, so a nearest restore through a flipped or rotated grid can differ from the same field
+stored unflipped - only at such exact ties, which a grid lands on when its samples sit
+precisely between the model's. Linear is exact under flips and axis swaps.
+
 Work is bounded by the region asked for: an ROI touches only the model box under it, read
 once per part. The GPU paths (Metal, Triton) make the same decisions bit for bit.
 """
