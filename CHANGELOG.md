@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.7 - 2026-09-25
 
 - **Restore onto a world geometry.** `restore(parts, grid=<Geometry>)` puts an unframed part's
   labels on any world grid through its own array geometry: output index -> world -> stored
