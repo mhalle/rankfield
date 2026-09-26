@@ -15,13 +15,13 @@ from .encode import (DEFAULT_MEMORY_BUDGET, choose_region_slab, choose_slab, enc
 from .frame import Frame
 from .geometry import Geometry
 from .grid import Grid
-from .mapping import Mapping
+from .mapping import Affine, Mapping
 from .reference import reference_restore
 from . import store  # noqa: F401 - zarr at call time only
 from .restore import Restored, array_grid, mapping_of, resolve_grid, restore, roi_of
 
 __all__ = ["CLIP", "DEFAULT_DEPTH", "DEFAULT_MEMORY_BUDGET", "FORMAT_VERSION", "GAP_UNIT", "SUPPORT_MAX", "TAIL_MAX",
-           "ZERO_LEVEL", "Frame", "Geometry", "Grid", "Mapping", "Part", "RankField", "Restored",
+           "ZERO_LEVEL", "Affine", "Frame", "Geometry", "Grid", "Mapping", "Part", "RankField", "Restored",
            "array_grid", "byte_of_gap", "choose_region_slab", "choose_slab", "decode_groups", "deficit", "encode", "encode_regions", "levels",
            "mapping_of", "margin", "probabilities", "reference_restore", "region_slab_bytes", "resolve_grid", "restore", "roi_of",
            "settle_ties", "slab_bytes", "tail_at", "to_device"]

@@ -23,6 +23,16 @@ crop); a part without one restores onto grids in its own array frame - voxel 0 a
 the array's true spacing - and cannot resolve ``"input"``. Every part of a multi-part
 restore must share one placement.
 
+*A world grid.* ``grid`` may also be a :class:`~rankfield.geometry.Geometry`: an unframed
+part then restores onto it through the world - output index -> world -> the part's array,
+from the two geometries (:class:`~rankfield.mapping.Affine`). That is how a field on a grid
+its model resampled in world space (FastSurfer's conformed grid) comes back onto an oblique
+input. When the two grids line up the map is per axis and the restore is the ordinary one,
+kernels included; otherwise the coordinates are per voxel, on the torch path, with every
+decision - the inside test, the edge clamp, corners, weights, the deficit - made as the
+per-axis path makes it. A framed part refuses a world grid: its frame is the exact rule its
+model grid was made by, and a world resample would only approximate it.
+
 Work is bounded by the region asked for: an ROI touches only the model box under it, read
 once per part. The GPU paths (Metal, Triton) make the same decisions bit for bit.
 """
@@ -37,7 +47,7 @@ from .code import Part, levels
 from .frame import Frame
 from .geometry import Geometry
 from .grid import Grid
-from .mapping import Mapping
+from .mapping import Affine, Mapping
 from .tables import AxisTable, build_tables
 
 LABEL_MAX = 65535
@@ -140,15 +150,20 @@ def output_geometry(part: Part, grid: Grid, fr: Frame | None, box) -> Geometry:
     return geo.regrid(tuple(b - a for a, b in box), grid.spacing, offset=start)
 
 
-def roi_of(parts, extents, grid_out: Grid, *, halo: int = 1) -> tuple:
+def roi_of(parts, extents, grid_out: Grid, *, halo: int = 1, world: Geometry | None = None) -> tuple:
     """The output-index box holding ``extents`` - ``[(part index, inclusive 6-box on that
     part's array), ...]`` - ``halo`` model voxels wider, through each part's inverse
-    mapping. A heuristic: a class can be elected a little past where it won."""
+    mapping (onto ``world``, a Geometry, when the restore is onto one: then all eight
+    corners, since a rotation takes a box's hull to its corners' hull). A heuristic: a
+    class can be elected a little past where it won."""
     lo = np.full(3, np.inf)
     hi = np.full(3, -np.inf)
     for i, e in extents:
-        inv = mapping_of(parts[i], grid_out).inverse()
-        for corner in (np.asarray(e[0::2], float) - halo, np.asarray(e[1::2], float) + halo):
+        inv = (Affine.between(world, parts[i].field.geometry).inverse() if world is not None
+               else mapping_of(parts[i], grid_out).inverse())
+        a, b = np.asarray(e[0::2], float) - halo, np.asarray(e[1::2], float) + halo
+        for corner in ([(z, y, x) for z in (a[0], b[0]) for y in (a[1], b[1]) for x in (a[2], b[2])]
+                       if world is not None else (a, b)):
             o = inv.apply(corner)
             lo = np.minimum(lo, np.floor(o))
             hi = np.maximum(hi, np.ceil(o))
@@ -178,7 +193,15 @@ def restore(parts, *, grid="input", interp: str = "linear", roi=None, device=Non
         if not _same_placement(parts[0], p):
             raise ValueError(f"part {p.name!r} is not placed like part {parts[0].name!r}; "
                              "a multi-part restore needs one placement")
-    grid_out, fr = resolve_grid(parts[0], grid)
+    world = grid if isinstance(grid, Geometry) else None
+    if world is not None:
+        if any(p.field.frame for p in parts):
+            raise ValueError("a part with a frame restores through its frame (the rule its model "
+                             "grid was made by), not onto a world geometry: pass \"input\", a "
+                             "spacing or a Grid")
+        grid_out, fr = Grid(shape=world.shape, spacing=world.spacing), None
+    else:
+        grid_out, fr = resolve_grid(parts[0], grid)
     dev = torch.device(device) if device is not None else torch.device("cpu")
     box = roi or tuple((0, n) for n in grid_out.shape)
     for (a, b), n in zip(box, grid_out.shape):
@@ -189,7 +212,9 @@ def restore(parts, *, grid="input", interp: str = "linear", roi=None, device=Non
     if max_label > LABEL_MAX:
         raise ValueError(f"a label of {max_label} does not fit uint16")
     dtype = np.uint8 if max_label < 256 else np.uint16
-    gpu = interp == "linear" and _gpu_kernel(dev, parts)
+    maps = [_world_map(p, world) if world is not None else None for p in parts]
+    gpu = (interp == "linear" and _gpu_kernel(dev, parts)
+           and all(m is None or isinstance(m, Mapping) for m in maps))
     if gpu:
         out_t = torch.zeros(out_shape, dtype=torch.uint8 if dtype is np.uint8 else torch.uint16, device=dev)
         out = None
@@ -201,12 +226,29 @@ def restore(parts, *, grid="input", interp: str = "linear", roi=None, device=Non
         names.append(p.name or str(n_part))
         if progress:
             progress(f"restore {names[-1]} ({n_part + 1}/{len(parts)})")
-        _restore_part(p, grid_out, box, interp, out if out is not None else out_t,
-                      paint=len(parts) > 1, dev=dev, slab_voxels=slab_voxels, gpu=gpu)
+        target = out if out is not None else out_t
+        if isinstance(maps[n_part], Affine):
+            _affine_part(p, maps[n_part], box, interp, target, paint=len(parts) > 1, dev=dev,
+                         slab_voxels=slab_voxels)
+        else:
+            _restore_part(p, grid_out, box, interp, target, paint=len(parts) > 1, dev=dev,
+                          slab_voxels=slab_voxels, gpu=gpu, mapping=maps[n_part])
     if gpu:
         out = out_t.cpu().numpy()
-    geo = output_geometry(parts[0], grid_out, fr, box)
+    if world is not None:
+        start = np.asarray([a for a, _ in box], float) * np.asarray(world.spacing)
+        geo = world.regrid(out_shape, world.spacing, offset=start)
+    else:
+        geo = output_geometry(parts[0], grid_out, fr, box)
     return Restored(labels=out, grid=grid_out, geometry=geo, frame=fr, parts=names, interp=interp, roi=roi)
+
+
+def _world_map(part: Part, world: Geometry):
+    """Output index on ``world`` -> the part's stored array: a per-axis :class:`Mapping`
+    when the two grids line up (the ordinary restore, kernels included), else the
+    :class:`Affine` itself."""
+    aff = Affine.between(world, part.field.geometry)
+    return aff.separable or aff
 
 
 def _gpu_kernel(dev, parts) -> bool:
@@ -236,8 +278,7 @@ def _shifted(i0, i1, f, lo):
             f.astype(np.float32))
 
 
-def _restore_part(part: Part, grid_out: Grid, box, interp, out, *, paint, dev, slab_voxels, gpu):
-    f = part.field
+def _checked_lut(f, out):
     lut_np = np.asarray([int(v) for v in f.labels], dtype=np.int64)
     if lut_np.max() > (255 if (out.dtype == np.uint8 if isinstance(out, np.ndarray) else out.dtype == torch.uint8) else LABEL_MAX):
         raise ValueError(f"a label of {lut_np.max()} does not fit the output buffer")
@@ -245,12 +286,19 @@ def _restore_part(part: Part, grid_out: Grid, box, interp, out, *, paint, dev, s
         raise ValueError(f"a label of {lut_np.min()} is negative; labels are unsigned")
     if len(lut_np) < f.classes:
         raise ValueError(f"the label table has {len(lut_np)} entries for {f.classes} classes")
+    return lut_np
+
+
+def _restore_part(part: Part, grid_out: Grid, box, interp, out, *, paint, dev, slab_voxels, gpu,
+                  mapping=None):
+    f = part.field
+    lut_np = _checked_lut(f, out)
     clip = f.clip
     lut_levels = levels(f.meta)
     ranks_arr, sup_arr = f.ranks, f.support
     N = int(ranks_arr.shape[0])
     src_shape = tuple(int(v) for v in ranks_arr.shape[1:])
-    mp = mapping_of(part, grid_out)
+    mp = mapping if mapping is not None else mapping_of(part, grid_out)
     tz, ty, tx = build_tables(grid_out.shape, src_shape, mp, interp=interp, outside="background")
     tabs = [(t.i0[a:b], t.i1[a:b], t.f[a:b]) for t, (a, b) in zip((tz, ty, tx), box)]
     spans = _spans(tabs)
@@ -320,6 +368,89 @@ def _restore_part_torch(R, S, shifted, lut_np, lut_levels, clip, out, paint, dev
         lab = lab.reshape(zb - za, ny_out, nx_out).cpu().numpy()
         keep = keep.reshape(zb - za, ny_out, nx_out).cpu().numpy()
         out[za:zb] = np.where(keep, lab.astype(out.dtype), out[za:zb] if paint else 0)
+
+
+def _axis_coords(c, n_src: int, interp: str):
+    """One axis of per-voxel coordinates, decided exactly as ``tables.axis_table`` decides a
+    row: inside within the voxel volumes, clamped to the edge inside, then the two indices
+    and the float32 weight of the second (zero for nearest)."""
+    valid = (c >= -0.5) & (c <= n_src - 0.5)
+    c = np.clip(c, 0.0, float(n_src - 1))
+    if interp == "linear":
+        i0 = np.floor(c)
+        f = c - i0
+        i1 = np.minimum(i0 + 1, n_src - 1)
+    else:
+        i0 = np.minimum(np.floor(c + 0.5), n_src - 1)
+        i1 = i0
+        f = np.zeros_like(c)
+    return valid, i0.astype(np.int64), i1.astype(np.int64), f.astype(np.float32)
+
+
+def _affine_part(part: Part, aff: Affine, box, interp, out, *, paint, dev, slab_voxels):
+    """``_restore_part`` for a map with rotation or shear: the same corners, weights and
+    decision, from coordinates computed per output voxel instead of per axis."""
+    f = part.field
+    lut_np = _checked_lut(f, out)
+    N = int(f.ranks.shape[0])
+    src = tuple(int(v) for v in f.ranks.shape[1:])
+    # the model box under the output box: an affine map takes a box's hull to the hull of
+    # its eight corners, and a sample reaches at most one voxel past a corner's coordinate
+    corners_out = np.array([[z, y, x] for z in (box[0][0], box[0][1] - 1)
+                            for y in (box[1][0], box[1][1] - 1) for x in (box[2][0], box[2][1] - 1)], float)
+    cc = aff.apply(corners_out)
+    lo = np.clip(np.floor(cc.min(0)) - 1, 0, np.asarray(src) - 1).astype(int)
+    hi = np.clip(np.ceil(cc.max(0)) + 2, 1, np.asarray(src)).astype(int)
+    if np.any(cc.max(0) < -0.5) or np.any(cc.min(0) > np.asarray(src) - 0.5):
+        return                                       # nothing of this part is under the ROI
+    R = np.ascontiguousarray(f.ranks[:, lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]])
+    S = (np.ascontiguousarray(f.support[:, lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]]) if N > 1
+         else np.zeros((0,) + R.shape[1:], np.uint8))
+    Rz, Ry, Rx = R.shape[1:]
+    lut = torch.as_tensor(lut_np, device=dev)
+    lv = torch.from_numpy(levels(f.meta)).to(dev)
+    Rt = torch.from_numpy(R).reshape(N, -1).to(dev)
+    St = torch.from_numpy(S).reshape(max(N - 1, 0), -1).to(dev) if N > 1 else None
+    (z0, z1), (y0, y1), (x0, x1) = box
+    ny, nx = y1 - y0, x1 - x0
+    rows = max(1, slab_voxels // max(1, ny * nx))
+    jy, jx = np.meshgrid(np.arange(y0, y1, dtype=np.float64), np.arange(x0, x1, dtype=np.float64),
+                         indexing="ij")
+    for za in range(z0, z1, rows):
+        zb = min(za + rows, z1)
+        jz = np.arange(za, zb, dtype=np.float64)
+        idx = np.stack(np.broadcast_arrays(jz[:, None, None], jy[None], jx[None]), -1).reshape(-1, 3)
+        c = aff.apply(idx)
+        axes = [_axis_coords(c[:, a], src[a], interp) for a in range(3)]
+        valid_np = axes[0][0] & axes[1][0] & axes[2][0]
+        valid = torch.from_numpy(valid_np).to(dev)
+        (_, iz0, iz1, wz), (_, iy0, iy1, wy), (_, ix0, ix1, wx) = axes
+        t = lambda a: torch.from_numpy(a).to(dev)   # noqa: E731
+        iz0, iz1, iy0, iy1, ix0, ix1 = (t(np.where(valid_np, v - o, 0)) for v, o in
+                                        ((iz0, lo[0]), (iz1, lo[0]), (iy0, lo[1]), (iy1, lo[1]),
+                                         (ix0, lo[2]), (ix1, lo[2])))
+        wz, wy, wx = t(wz), t(wy), t(wx)
+        corners, weights = [], []
+        for iz, fz in ((iz0, 1 - wz), (iz1, wz)):
+            for iy, fy in ((iy0, 1 - wy), (iy1, wy)):
+                for ix, fx in ((ix0, 1 - wx), (ix1, wx)):
+                    corners.append((iz * Ry + iy) * Rx + ix)
+                    weights.append(fz * fy * fx)
+        assert all(int(k.min()) >= 0 and int(k.max()) < Rz * Ry * Rx for k in corners)
+        win = torch.stack([Rt[0][k].to(torch.int32) for k in corners])
+        uniform = (win == win[0:1]).all(0)
+        best = win[0].clone()
+        hard = (~uniform & valid).nonzero(as_tuple=True)[0]
+        if hard.numel() and interp == "linear":
+            best[hard] = _decide(Rt, St, [k[hard] for k in corners], [w[hard] for w in weights], N,
+                                 f.clip, lv)
+        lab = lut[(best - 1).clamp(min=0)]
+        keep = valid & (best != 1) if paint else valid
+        shape = (zb - za, ny, nx)
+        lab = lab.reshape(shape).cpu().numpy()
+        keep = keep.reshape(shape).cpu().numpy()
+        sl = out[za - z0:zb - z0]
+        out[za - z0:zb - z0] = np.where(keep, lab.astype(out.dtype), sl if paint else 0)
 
 
 def _decide(R, S, corners, weights, N, clip, lv):

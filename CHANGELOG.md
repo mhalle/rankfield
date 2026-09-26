@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Restore onto a world geometry.** `restore(parts, grid=<Geometry>)` puts an unframed part's
+  labels on any world grid through its own array geometry: output index -> world -> stored
+  array, a general affine (`rankfield.Affine`, built by `Affine.between(geo_from, geo_to)`).
+  This is how a field on a grid its model resampled in world space - FastSurfer's conformed
+  1 mm grid - comes back onto an oblique input, which no per-axis `Mapping` can describe.
+  When the two grids line up the map IS per axis and the restore is the ordinary one, fused
+  kernels included; otherwise coordinates are computed per output voxel on the torch path,
+  with every decision (the inside test, the edge clamp, corners, weights, the deficit) the
+  per-axis path's. Held to it bit for bit where both apply, and exactly under flips and axis
+  swaps with binary-exact coordinates. A framed part refuses a world grid: its frame is the
+  exact rule its model grid was made by. `roi_of(..., world=)` bounds a structure on one.
+  No stored byte changes.
+
 ## 0.3.6 - 2026-09-23
 
 The encoder's selection moves off `topk` and `sort` where they were slow. No bytes move: both
