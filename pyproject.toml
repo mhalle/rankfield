@@ -11,9 +11,9 @@ requires-python = ">=3.12"
 # labelfield holds the geometry (Grid, Mapping, Affine, the per-axis tables and decision rule),
 # shared with haversack's live restore so the two decide alike. It is not on PyPI, so it is a
 # direct git reference: `pip install rankfield @ git+...` resolves it (a bare name would not).
-# Pinned to a tag on main (a release); the dev branch tracks labelfield's dev instead. haversack
+# The dev branch tracks labelfield's dev (main pins a tag, as a release). haversack's dev
 # declares the same string - uv reads two spellings of one package as a conflict.
-dependencies = ["numpy>=1.24", "labelfield @ git+https://github.com/mhalle/labelfield.git@v0.1.2"]
+dependencies = ["numpy>=1.24", "labelfield @ git+https://github.com/mhalle/labelfield.git@dev"]
 
 [project.optional-dependencies]
 torch = ["torch>=2.7"]           # encode, decode_groups and the restore's blend run on torch
