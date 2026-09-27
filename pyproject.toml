@@ -4,17 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rankfield"
-version = "0.3.8"
+version = "0.3.9"
 description = "rankfield: a per-class field kept as ranks - the encoding, its decoders, and the restore"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 # labelfield holds the geometry (Grid, Mapping, Affine, the per-axis tables and decision rule),
 # shared with haversack's live restore so the two decide alike. It is not on PyPI, so it is a
 # direct git reference: `pip install rankfield @ git+...` resolves it (a bare name would not).
-# Unpinned for now (2026-09-27, the user's call): it tracks labelfield's main, so a labelfield
-# release does not have to ripple through rankfield, feldglas and haversack in lockstep.
-# haversack declares the same string - uv reads two spellings of one package as a conflict.
-dependencies = ["numpy>=1.24", "labelfield @ git+https://github.com/mhalle/labelfield.git"]
+# Pinned to a tag on main (a release); the dev branch tracks labelfield's dev instead. haversack
+# declares the same string - uv reads two spellings of one package as a conflict.
+dependencies = ["numpy>=1.24", "labelfield @ git+https://github.com/mhalle/labelfield.git@v0.1.2"]
 
 [project.optional-dependencies]
 torch = ["torch>=2.7"]           # encode, decode_groups and the restore's blend run on torch

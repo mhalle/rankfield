@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.9 - 2026-09-27
 
-- **labelfield is unpinned** (it tracks labelfield's `main`), so its fixes reach rankfield without a
-  rankfield release. 0.1.2 evaluates the voxel-center rule as scipy does, so a framed restore under
-  the center convention picks scipy's sample at exact half-way ties.
+- **labelfield v0.1.2**, pinned: it evaluates the voxel-center rule as scipy does, so a framed
+  restore under the center convention picks scipy's sample at exact half-way ties. Development
+  continues on the `dev` branch, which tracks labelfield's `dev`.
 
 ## 0.3.8 - 2026-09-27
 
