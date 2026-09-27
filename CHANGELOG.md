@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **labelfield is unpinned** (it tracks labelfield's `main`), so its fixes reach rankfield without a
+  rankfield release. 0.1.2 evaluates the voxel-center rule as scipy does, so a framed restore under
+  the center convention picks scipy's sample at exact half-way ties.
+
 ## 0.3.8 - 2026-09-27
 
 - **The geometry is labelfield's** ([mhalle/labelfield](https://github.com/mhalle/labelfield)
