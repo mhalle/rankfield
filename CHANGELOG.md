@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The geometry is labelfield's** ([mhalle/labelfield](https://github.com/mhalle/labelfield)
+  v0.1.1, a git dependency): `Grid`, `Mapping`, `Affine`, the per-axis tables and the decision
+  rule (`axis_coords`) that both the tables and the world restore apply. `rankfield.grid`,
+  `.mapping` and `.tables` re-export them. The same code now decides haversack's live restore
+  and a restore from a store, so the two agree at every voxel.
+- **Nearest: a coordinate exactly half a voxel past the last sample is outside** (it picks a
+  sample that does not exist), where it was clamped onto that sample. Only exact half-voxel
+  positions past an edge change; linear is unchanged.
+
 - **A world restore between grids that line up takes the fast path again.** Two oblique grids of
   one orientation compose to off-diagonal terms of ~1e-17, which `Affine.separable` read as a
   rotation: the per-axis path and its kernels were skipped (~40x slower on MPS). Terms below

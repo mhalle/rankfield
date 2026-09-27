@@ -37,7 +37,9 @@ model grid was made by, and a world resample would only approximate it.
 UP (``floor(c + 0.5)``). Under a reversed axis the higher index is the other sample in the
 world, so a nearest restore through a flipped or rotated grid can differ from the same field
 stored unflipped - only at such exact ties, which a grid lands on when its samples sit
-precisely between the model's. Linear is exact under flips and axis swaps.
+precisely between the model's. Linear is exact under flips and axis swaps. A coordinate exactly
+half a voxel past the last sample is outside for nearest - the sample it picks does not exist -
+and inside for linear (``labelfield.tables.axis_coords``, since 0.3.8).
 
 Work is bounded by the region asked for: an ROI touches only the model box under it, read
 once per part. The GPU paths (Metal, Triton) make the same decisions bit for bit.
@@ -54,7 +56,7 @@ from .frame import Frame
 from .geometry import Geometry
 from .grid import Grid
 from .mapping import Affine, Mapping
-from .tables import AxisTable, build_tables
+from .tables import AxisTable, axis_coords, build_tables
 
 LABEL_MAX = 65535
 
@@ -377,20 +379,11 @@ def _restore_part_torch(R, S, shifted, lut_np, lut_levels, clip, out, paint, dev
 
 
 def _axis_coords(c, n_src: int, interp: str):
-    """One axis of per-voxel coordinates, decided exactly as ``tables.axis_table`` decides a
-    row: inside within the voxel volumes, clamped to the edge inside, then the two indices
-    and the float32 weight of the second (zero for nearest)."""
-    valid = (c >= -0.5) & (c <= n_src - 0.5)
-    c = np.clip(c, 0.0, float(n_src - 1))
-    if interp == "linear":
-        i0 = np.floor(c)
-        f = c - i0
-        i1 = np.minimum(i0 + 1, n_src - 1)
-    else:
-        i0 = np.minimum(np.floor(c + 0.5), n_src - 1)
-        i1 = i0
-        f = np.zeros_like(c)
-    return valid, i0.astype(np.int64), i1.astype(np.int64), f.astype(np.float32)
+    """One axis of per-voxel coordinates, decided by the rule ``tables.axis_table`` applies to a
+    row (labelfield's ``axis_coords``, the one place it lives): inside or not, the two indices and
+    the float32 weight of the second (zero for nearest)."""
+    valid, i0, i1, f = axis_coords(c, n_src, interp=interp)
+    return valid, i0, i1, f.astype(np.float32)
 
 
 def _affine_part(part: Part, aff: Affine, box, interp, out, *, paint, dev, slab_voxels):

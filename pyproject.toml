@@ -8,7 +8,10 @@ version = "0.3.7"
 description = "rankfield: a per-class field kept as ranks - the encoding, its decoders, and the restore"
 license = "Apache-2.0"
 requires-python = ">=3.12"
-dependencies = ["numpy>=1.24"]
+# labelfield holds the geometry (Grid, Mapping, Affine, the per-axis tables and decision rule),
+# shared with haversack's live restore so the two decide alike. It is not on PyPI, so it is a
+# direct git reference: `pip install rankfield @ git+...` resolves it (a bare name would not).
+dependencies = ["numpy>=1.24", "labelfield @ git+https://github.com/mhalle/labelfield.git@v0.1.1"]
 
 [project.optional-dependencies]
 torch = ["torch>=2.7"]           # encode, decode_groups and the restore's blend run on torch
@@ -25,6 +28,9 @@ dev = ["duckn>=0.3"]
 
 [tool.uv.sources]
 duckn = { git = "https://github.com/mhalle/duckn.git", tag = "v0.5.1" }
+
+[tool.hatch.metadata]
+allow-direct-references = true             # the labelfield git dependency
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rankfield"]

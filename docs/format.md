@@ -217,7 +217,11 @@ stored winner) and is a no-op on real interpolated output.
 transparent, whatever its label table maps class 0 to.
 
 *Nearest* interpolation is the stored winner at the nearest model voxel, exact by
-construction.
+construction. A coordinate exactly half-way between two samples takes the higher (``floor(c +
+0.5)``), and one exactly half a voxel past the last sample is outside, since the voxel it would
+take does not exist (0.3.8; before, it was clamped onto the last sample). Linear counts a
+coordinate inside out to half a voxel past either end. The rule is labelfield's ``axis_coords``,
+the one haversack's live restore uses, so the two agree at every voxel.
 
 *Placement.* A part carries either a frame record (how the array was derived from a source
 grid: source grid, crop, model shape, resample convention) and restores onto grids in the

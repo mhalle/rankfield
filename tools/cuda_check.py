@@ -34,10 +34,20 @@ def _duckn_spec() -> str:
     return f"duckn @ git+{m.group(1)}@{m.group(2)}"
 
 
+def _labelfield_spec() -> str:
+    """The labelfield reference this project's own pyproject names, so the worker installs what
+    `pip install rankfield` would."""
+    m = re.search(r'"(labelfield @ git\+[^"]+)"', (ROOT / "pyproject.toml").read_text())
+    if not m:
+        raise SystemExit("pyproject.toml: no labelfield git dependency found")
+    return m.group(1)
+
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git")
     .pip_install("torch>=2.7", "triton>=3.0", "numpy>=1.24", "pytest>=8", "zarr>=3.3",
+                 _labelfield_spec() if modal.is_local() else "labelfield",
                  _duckn_spec() if modal.is_local() else "duckn")     # the image builds locally
     .add_local_dir(str(ROOT / "src" / "rankfield"), remote_path="/root/pkg/rankfield")
     .add_local_dir(str(ROOT / "tests"), remote_path="/root/tests")
