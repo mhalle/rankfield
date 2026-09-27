@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.8 - 2026-09-27
 
 - **The geometry is labelfield's** ([mhalle/labelfield](https://github.com/mhalle/labelfield)
   v0.1.1, a git dependency): `Grid`, `Mapping`, `Affine`, the per-axis tables and the decision
