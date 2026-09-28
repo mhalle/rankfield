@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Importing the backends no longer keeps the caller alive.** On a machine without triton, the
+  failed import was stored as an exception whose traceback held every frame live at the first
+  import, so the first caller's arrays, tensors and models stayed referenced for the life of the
+  process. Only the message is kept now.
+
 ## 0.3.9 - 2026-09-27
 
 - **labelfield v0.1.2**, pinned: it evaluates the voxel-center rule as scipy does, so a framed

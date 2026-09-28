@@ -19,7 +19,10 @@ try:
     _TRITON_IMPORT_ERROR = None
 except Exception as _e:                                     # pragma: no cover - depends on the box
     triton = None
-    _TRITON_IMPORT_ERROR = _e
+    # the message only: the exception's traceback would hold every frame live at the first
+    # import (the caller's arrays and models) for the life of the process
+    _TRITON_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+    del _e
 
 
 def _has_fp_fusion_option() -> bool:
