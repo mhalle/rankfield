@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.10 - 2026-09-28
 
+- **labelfield v0.1.3**, pinned: crop offsets compose as exact integer steps (a cropped nearest
+  restore picks the uncropped one's sample at exact ties), clearer errors, documentation.
 - **Importing the backends no longer keeps the caller alive.** On a machine without triton, the
   failed import was stored as an exception whose traceback held every frame live at the first
   import, so the first caller's arrays, tensors and models stayed referenced for the life of the
