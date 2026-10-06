@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.11 - 2026-10-05
+
+- **labelfield v0.1.5**, pinned. What rankfield imports from it (the grid, the mapping, the tables
+  and the per-axis rule) is unchanged since v0.1.3; v0.1.4 and v0.1.5 change only labelfield's
+  torch restore backend (a 7x faster CPU argmax, and no GB-scale temporary before it), which
+  haversack uses. The pin moves so that haversack can name the same labelfield reference.
+
 ## 0.3.10 - 2026-09-28
 
 - **labelfield v0.1.3**, pinned: crop offsets compose as exact integer steps (a cropped nearest
